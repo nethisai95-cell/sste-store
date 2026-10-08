@@ -1801,6 +1801,12 @@ function App() {
         : `✓ Order ${delivery.orderNumber} updated: ${status.replaceAll('_', ' ')}.`);
       await loadDeliveryAssignments();
     } catch (error) {
+      if (/sign-in required|session expired|inactive/i.test(error.message)) {
+        setDeliveryAgent(null);
+        setDeliveryAssignments([]);
+        setDeliveryError('Your session ended. Please sign in again, then confirm the delivery. Nothing was lost.');
+        return;
+      }
       setDeliveryError(error.message);
     } finally {
       setDeliveryBusyId('');

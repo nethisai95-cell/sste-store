@@ -122,6 +122,7 @@ app.use(session({
   store: new PgSession({ pool, createTableIfMissing: true, pruneSessionInterval: 60 }),
   secret: process.env.SESSION_SECRET,
   resave: false,
+  rolling: true,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,

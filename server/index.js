@@ -141,7 +141,7 @@ function broadcastChange() {
   clearTimeout(liveTimer);
   liveTimer = setTimeout(() => {
     for (const client of liveClients) client.write(`event: change\ndata: ${liveVersion}\n\n`);
-  }, 150);
+  }, 40);
 }
 
 app.use('/api', (request, response, next) => {

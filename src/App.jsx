@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import QRCode from 'qrcode';
 import { razorpayMethodOptions } from './payment-methods.js';
 import { parseQrPayload, unitShortCode } from './qr-scan.js';
@@ -220,6 +221,48 @@ function printWithPage(pageCss) {
   window.print();
 }
 
+function PrintLayer({ children }) {
+  return createPortal(<div className="qr-print-layer">{children}</div>, document.body);
+}
+
+function usePrintJob(pageCss) {
+  const [printing, setPrinting] = useState(false);
+  useEffect(() => {
+    if (!printing) return undefined;
+    const timer = window.setTimeout(() => printWithPage(pageCss), 50);
+    const done = () => setPrinting(false);
+    window.addEventListener('afterprint', done);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('afterprint', done);
+    };
+  }, [printing, pageCss]);
+  return [printing, () => setPrinting(true)];
+}
+
+function PrintSheetButton({ units, productName }) {
+  const [printing, startPrint] = usePrintJob(LABEL_SHEET_PAGE_CSS);
+  return (
+    <>
+      <button type="button" className="primary-button" onClick={startPrint}>Print all labels</button>
+      {printing && (
+        <PrintLayer>
+          <div className="qr-label-sheet">
+            {units.map((unit) => (
+              <QrSheetLabel
+                key={unit.id}
+                code={unitShortCode(unit.id)}
+                name={productName}
+                url={`${window.location.origin}/admin?unit=${encodeURIComponent(unit.id)}`}
+              />
+            ))}
+          </div>
+        </PrintLayer>
+      )}
+    </>
+  );
+}
+
 function AdminQrLabel({
   url,
   title,
@@ -228,6 +271,7 @@ function AdminQrLabel({
 }) {
   const [imageUrl, setImageUrl] = useState('');
   const [error, setError] = useState('');
+  const [printing, startPrint] = usePrintJob(LABEL_PAGE_CSS);
 
   useEffect(() => {
     let active = true;
@@ -248,10 +292,18 @@ function AdminQrLabel({
         <strong>{title}</strong>
         <span>{identifier}</span>
         <small>{description}</small>
-        <button className="secondary-button admin-qr-print-button" type="button"         disabled={!imageUrl} onClick={() => printWithPage(LABEL_PAGE_CSS)}>
-                  Print QR label
-                </button>
+        <button className="secondary-button admin-qr-print-button" type="button" disabled={!imageUrl} onClick={startPrint}>
+          Print QR label
+        </button>
       </div>
+      {printing && (
+        <PrintLayer>
+          <div className="qr-print-single">
+            <img src={imageUrl} alt="" />
+            <div><strong>{title}</strong><span>{identifier}</span></div>
+          </div>
+        </PrintLayer>
+      )}
     </div>
   );
 }
@@ -3147,9 +3199,7 @@ function App() {
                               {labelSheetProductId === product.id ? 'Hide label sheet' : `Label sheet (${inventoryUnitsByProduct[product.id].units.length})`}
                             </button>
                             {labelSheetProductId === product.id && (
-                              <button type="button"                               className="primary-button" onClick={() => printWithPage(LABEL_SHEET_PAGE_CSS)}>
-                                                              Print all labels
-                                                            </button>
+                              <PrintSheetButton units={inventoryUnitsByProduct[product.id].units} productName={product.name} />
                             )}
                           </div>
                         )}

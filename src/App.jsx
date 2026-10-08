@@ -720,6 +720,8 @@ function App() {
   const [scannerMode, setScannerMode] = useState('');
   const [labelSheetProductId, setLabelSheetProductId] = useState('');
   const [deliveryPinDrafts, setDeliveryPinDrafts] = useState({});
+  const [deliveryBusyId, setDeliveryBusyId] = useState('');
+  const [deliveryActionId, setDeliveryActionId] = useState('');
   const [deliveryNoteDrafts, setDeliveryNoteDrafts] = useState({});
   const [deliveryFocusUnitId, setDeliveryFocusUnitId] = useState(
     () => new URLSearchParams(window.location.search).get('unit'),
@@ -1781,6 +1783,8 @@ function App() {
     if (!status) return;
     setDeliveryError('');
     setDeliveryNotice('');
+    setDeliveryActionId(delivery.deliveryId);
+    setDeliveryBusyId(delivery.deliveryId);
     try {
       await apiRequest(`/api/delivery/assignments/${encodeURIComponent(delivery.deliveryId)}/status`, {
         method: 'PATCH',
@@ -1792,10 +1796,15 @@ function App() {
       });
       setDeliveryPinDrafts((previous) => ({ ...previous, [delivery.deliveryId]: '' }));
       setDeliveryNoteDrafts((previous) => ({ ...previous, [delivery.deliveryId]: '' }));
-      setDeliveryNotice(`Order ${delivery.orderNumber} updated: ${status.replaceAll('_', ' ')}.`);
+      setDeliveryNotice(status === 'delivered'
+        ? `✓ Order ${delivery.orderNumber} marked as DELIVERED.`
+        : `✓ Order ${delivery.orderNumber} updated: ${status.replaceAll('_', ' ')}.`);
       await loadDeliveryAssignments();
     } catch (error) {
       setDeliveryError(error.message);
+    } finally {
+      setDeliveryBusyId('');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
 
@@ -4184,17 +4193,20 @@ function App() {
                             <button
                               className="primary-button"
                               type="button"
-                              disabled={delivery.deliveryStatus === 'assigned' && !allUnitsScanned}
+                              disabled={(delivery.deliveryStatus === 'assigned' && !allUnitsScanned) || deliveryBusyId === delivery.deliveryId}
                               onClick={() => {
                                 if (nextStatus === 'delivered' && !/^\d{6}$/.test(deliveryPinDrafts[delivery.deliveryId] || '')) {
                                   setDeliveryNotice('');
+                                  setDeliveryActionId(delivery.deliveryId);
                                   setDeliveryError('Enter the 6-digit delivery PIN first. The customer finds it under Account → Orders → Delivery PIN.');
                                   return;
                                 }
                                 updateDeliveryStep(delivery);
                               }}
                             >
-                              {nextStatus === 'delivered'
+                              {deliveryBusyId === delivery.deliveryId
+                                ? 'Saving…'
+                                : nextStatus === 'delivered'
                                 ? 'Confirm delivery'
                                 : nextStatus === 'picked_up'
                                   ? 'Confirm parcel pickup'
@@ -4214,6 +4226,9 @@ function App() {
                             </button>
                           )}
                         </div>
+                        {deliveryActionId === delivery.deliveryId && deliveryError && (
+                          <p className="account-error" role="alert">✗ {deliveryError}</p>
+                        )}
                         {delivery.history.length > 0 && (
                           <details className="delivery-event-history">
                             <summary>Recent tracking events</summary>

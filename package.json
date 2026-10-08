@@ -1,0 +1,36 @@
+{
+  "name": "sste-store",
+  "version": "1.0.0",
+  "description": "Modern ecommerce storefront built with React and Vite.",
+  "private": true,
+  "scripts": {
+    "dev": "node server/dev.js",
+    "build": "vite build",
+    "test": "node --test",
+    "test:unit": "node --test tests/order-validation.test.js tests/delivery-transitions.test.js tests/payment-methods.test.js tests/finance-validation.test.js",
+    "preview": "vite preview --host 0.0.0.0",
+    "start": "node server/index.js",
+    "admin:hash": "node server/hash-password.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "connect-pg-simple": "^10.0.0",
+    "dotenv": "^18.0.6",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.7.1",
+    "express-session": "^1.19.0",
+    "helmet": "^8.3.0",
+    "pg": "^8.23.1",
+    "qrcode": "^1.5.4",
+    "razorpay": "^2.9.8",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.1.2",
+    "vite": "^8.3.3"
+  }
+}

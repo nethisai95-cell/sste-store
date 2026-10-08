@@ -1,0 +1,783 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SSTE Studio | Product film</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: "Segoe UI", Arial, sans-serif;
+      color: #222b25;
+      background: #f2eee6;
+    }
+    * { box-sizing: border-box; }
+    body { max-width: 1040px; margin: 38px auto; padding: 0 24px 32px; }
+    h1 { margin: 0 0 8px; font: 600 30px Georgia, serif; }
+    p { max-width: 780px; line-height: 1.55; color: #68736a; }
+    .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 22px 0 8px; }
+    button { padding: 12px 17px; border: 0; border-radius: 7px; color: white; background: #345b49; font-weight: 650; cursor: pointer; }
+    button.secondary { color: #345b49; background: #e1e8df; }
+    a.download { padding: 12px 17px; border: 1px solid #345b49; border-radius: 7px; color: #345b49; font-weight: 650; text-decoration: none; }
+    a[hidden] { display: none; }
+    button:disabled { opacity: .55; cursor: wait; }
+    #status { min-height: 23px; font-size: 14px; font-weight: 600; }
+    progress { width: 100%; height: 7px; accent-color: #b37946; }
+    .frame { overflow: hidden; margin: 16px 0 0; border-radius: 14px; background: #25352c; box-shadow: 0 20px 52px #3b382b26; }
+    canvas { display: block; width: 100%; height: auto; }
+    .small { font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>A better kind of backstage.</h1>
+  <p>A motion-led product film for SSTE Studio. Animated interface vignettes use illustrative sample values only—no live store or customer information is shown. The video is silent and designed to read with its on-screen captions.</p>
+  <div class="controls">
+    <button id="preview" class="secondary" type="button">Preview motion</button>
+    <button id="record" type="button">Render the video</button>
+    <a id="download" class="download" hidden>Download video</a>
+    <span id="status" role="status">A seven-scene product tour is ready.</span>
+  </div>
+  <progress id="progress" max="100" value="0"></progress>
+  <div class="frame"><canvas id="film" width="1280" height="720" aria-label="Animated SSTE Studio product film preview"></canvas></div>
+  <p class="small">Render takes about 55 seconds. Keep this page open; when the film is ready, use Download video to save the WebM.</p>
+
+  <script>
+    const canvas = document.querySelector('#film');
+    const ctx = canvas.getContext('2d');
+    const previewButton = document.querySelector('#preview');
+    const recordButton = document.querySelector('#record');
+    const downloadLink = document.querySelector('#download');
+    const status = document.querySelector('#status');
+    const progress = document.querySelector('#progress');
+    const W = canvas.width;
+    const H = canvas.height;
+    const SCENE_DURATION = 7900;
+    const palette = {
+      ink: '#28342d',
+      muted: '#7d8478',
+      green: '#355b49',
+      deep: '#21382e',
+      pale: '#e4e9de',
+      cream: '#f2eee6',
+      white: '#fffdf9',
+      line: '#e7e5dc',
+      orange: '#bc8151',
+      gold: '#d7b98d',
+      red: '#a5574d',
+    };
+    const scenes = [
+      {
+        eyebrow: 'MEET YOUR NEW BACKSTAGE',
+        title: 'A more thoughtful\\nway to run your store.',
+        description: 'A beautiful storefront out front. Clear, connected operations behind it.',
+        tag: 'ONE STORE. A CLEARER VIEW.',
+        kind: 'opening',
+      },
+      {
+        eyebrow: 'THE SHOPPING EXPERIENCE',
+        title: 'Made to feel like\\nyour brand.',
+        description: 'Invite customers to explore considered collections and checkout in Indian rupees.',
+        tag: 'STOREFRONT · COLLECTIONS · CHECKOUT',
+        kind: 'store',
+      },
+      {
+        eyebrow: 'THE OWNER’S VIEW',
+        title: 'Know what’s moving.\\nSee what’s next.',
+        description: 'Bring orders, sales trends, products, regions, and store health into focus.',
+        tag: 'BUSINESS INTELLIGENCE',
+        kind: 'insights',
+      },
+      {
+        eyebrow: 'INVENTORY, ITEM BY ITEM',
+        title: 'Every piece has\\nits own story.',
+        description: 'Give each tracked physical unit a unique QR identity and an auditable lifecycle.',
+        tag: 'RECEIVED → AVAILABLE → RESERVED → SOLD',
+        kind: 'inventory',
+      },
+      {
+        eyebrow: 'A HANDOFF YOU CAN FOLLOW',
+        title: 'From stockroom\\nto delivery route.',
+        description: 'Assign a paid order, scan each item at pickup, and record every delivery handoff.',
+        tag: 'OWNER ASSIGNS · STAFF SCANS · EVENTS TRACK',
+        kind: 'dispatch',
+      },
+      {
+        eyebrow: 'THE PERSONAL TOUCH STILL MATTERS',
+        title: 'Help people. Learn\\nfrom every order.',
+        description: 'Keep support and feedback close. Explore aggregate report insights with optional Gemini.',
+        tag: 'CUSTOMER CARE · FEEDBACK · OPTIONAL AI',
+        kind: 'care',
+      },
+      {
+        eyebrow: 'SSTE STUDIO',
+        title: 'Thoughtful on the\\nfront. In control\\nbehind it.',
+        description: 'One connected workspace for the day-to-day rhythm of your store.',
+        tag: 'A CLEARER WAY TO RUN YOUR STORE.',
+        kind: 'closing',
+      },
+    ];
+    const smooth = (value) => {
+      const x = Math.max(0, Math.min(1, value));
+      return x * x * (3 - 2 * x);
+    };
+    const easeOut = (value) => 1 - Math.pow(1 - Math.max(0, Math.min(1, value)), 3);
+    const clamp01 = (value) => Math.max(0, Math.min(1, value));
+
+    function rounded(x, y, width, height, radius, fill, stroke) {
+      ctx.beginPath();
+      ctx.roundRect(x, y, width, height, radius);
+      ctx.fillStyle = fill;
+      ctx.fill();
+      if (stroke) {
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    }
+
+    function label(text, x, y, font, color, align = 'left') {
+      ctx.font = font;
+      ctx.fillStyle = color;
+      ctx.textAlign = align;
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillText(text, x, y);
+      ctx.textAlign = 'left';
+    }
+
+    function line(x1, y1, x2, y2, color, width = 1) {
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.stroke();
+    }
+
+    function dot(x, y, radius, color) {
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+    }
+
+    function drawBackdrop(t, index) {
+      ctx.fillStyle = palette.cream;
+      ctx.fillRect(0, 0, W, H);
+      const glow = ctx.createRadialGradient(
+        1000 + Math.sin(t * 0.6) * 65, 80 + index * 45, 6,
+        1000, 90 + index * 45, 670,
+      );
+      glow.addColorStop(0, 'rgba(212, 190, 158, 0.27)');
+      glow.addColorStop(1, 'rgba(212, 190, 158, 0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, W, H);
+      ctx.save();
+      ctx.globalAlpha = 0.075;
+      for (let i = 0; i < 33; i += 1) {
+        const x = (i * 181 + t * 9) % W;
+        const y = (i * 97) % H;
+        dot(x, y, 1 + i % 2, palette.green);
+      }
+      ctx.restore();
+      ctx.fillStyle = palette.deep;
+      ctx.fillRect(0, 0, W, 12);
+      const sheenX = (t * 225) % (W + 450) - 225;
+      const sheen = ctx.createLinearGradient(sheenX, 0, sheenX + 200, 0);
+      sheen.addColorStop(0, 'rgba(255,255,255,0)');
+      sheen.addColorStop(0.5, 'rgba(235,218,189,0.58)');
+      sheen.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = sheen;
+      ctx.fillRect(Math.max(0, sheenX), 12, 200, 2);
+    }
+
+    function drawBrand(t) {
+      rounded(58, 46, 36, 36, 9, palette.green);
+      label('S', 76, 72, 'bold 22px Georgia, serif', palette.white, 'center');
+      label('SSTE', 106, 65, '600 14px "Segoe UI", Arial, sans-serif', palette.ink);
+      label('STUDIO', 106, 80, '500 9px "Segoe UI", Arial, sans-serif', palette.muted);
+      label('STUDIO FILM  /  INDIA', 1222, 68, '600 9px "Segoe UI", Arial, sans-serif', palette.muted, 'right');
+      line(58, 101, 1222, 101, '#dcd9cf');
+      rounded(1081, 618, 140, 31, 16, palette.white, '#e3dfd5');
+      label('SAMPLE STORE DATA', 1151, 638, '600 9px "Segoe UI", Arial, sans-serif', palette.muted, 'center');
+      rounded(58, 654, 1164, 4, 2, '#ddd9cf');
+    }
+
+    function drawProgress(index, local) {
+      rounded(58, 654, 1164 * ((index + clamp01(local / SCENE_DURATION)) / scenes.length), 4, 2, palette.orange);
+      scenes.forEach((_, i) => dot(58 + i * 17, 679, i === index ? 3 : 1.7, i === index ? palette.orange : '#c9c4b9'));
+      label('SSTE STUDIO  ·  THE OPERATING RHYTHM OF YOUR STORE', 1222, 682, '500 9px "Segoe UI", Arial, sans-serif', palette.muted, 'right');
+    }
+
+    function drawCopy(scene, local, dark = false) {
+      const entrance = easeOut(local / 820);
+      const titleLines = scene.title.split('\\n');
+      const ink = dark ? palette.white : palette.ink;
+      const secondary = dark ? '#d0d9cf' : '#6f776e';
+      const lift = (1 - entrance) * 20;
+      ctx.globalAlpha = entrance;
+      label(scene.eyebrow, 74, 185 + lift, '700 10px "Segoe UI", Arial, sans-serif', palette.orange);
+      titleLines.forEach((row, i) => {
+        label(row, 72, 247 + lift + i * 58, '600 43px Georgia, "Times New Roman", serif', ink);
+      });
+      const descriptionY = 271 + titleLines.length * 58 + lift;
+      const description = wrapWords(scene.description, 380, '16px "Segoe UI", Arial, sans-serif');
+      description.forEach((row, i) => label(row, 75, descriptionY + i * 25, '400 16px "Segoe UI", Arial, sans-serif', secondary));
+      const tagY = Math.min(584, descriptionY + description.length * 25 + 19);
+      rounded(72, tagY - 18, Math.min(434, scene.tag.length * 7 + 30), 31, 16, dark ? 'rgba(255,255,255,.11)' : '#e5e9df');
+      label(scene.tag, 87, tagY + 2, '650 9px "Segoe UI", Arial, sans-serif', dark ? '#f1ddbd' : palette.green);
+      ctx.globalAlpha = 1;
+    }
+
+    function wrapWords(value, maxWidth, font) {
+      ctx.font = font;
+      const rows = [];
+      let row = '';
+      for (const word of value.split(' ')) {
+        const candidate = row ? `${row} ${word}` : word;
+        if (ctx.measureText(candidate).width > maxWidth && row) {
+          rows.push(row);
+          row = word;
+        } else row = candidate;
+      }
+      if (row) rows.push(row);
+      return rows;
+    }
+
+    function drawBrowser(x, y, width, height, t, options = {}) {
+      ctx.save();
+      ctx.shadowColor = 'rgba(42, 47, 39, .17)';
+      ctx.shadowBlur = 38;
+      ctx.shadowOffsetY = 18;
+      rounded(x, y, width, height, 15, palette.white);
+      ctx.restore();
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(x, y, width, height, 15);
+      ctx.clip();
+      ctx.fillStyle = palette.white;
+      ctx.fillRect(x, y, width, height);
+      ctx.fillStyle = '#f7f6f2';
+      ctx.fillRect(x, y, width, 39);
+      dot(x + 17, y + 19, 4, '#d59782');
+      dot(x + 31, y + 19, 4, '#e0be80');
+      dot(x + 45, y + 19, 4, '#8fae90');
+      rounded(x + width * 0.31, y + 10, width * 0.37, 18, 8, '#eeece5');
+      label(options.url || 'sstestudio.in / owner', x + width * 0.495, y + 23, '500 8px "Segoe UI", Arial, sans-serif', '#8a8c83', 'center');
+      ctx.restore();
+      rounded(x + width - 104, y + 52, 80, 24, 12, '#eff2eb');
+      dot(x + width - 90, y + 64, 3, palette.green);
+      label('CONNECTED', x + width - 82, y + 67, '600 8px "Segoe UI", Arial, sans-serif', palette.green);
+    }
+
+    function drawLivingRoom(x, y, width, height, t) {
+      ctx.save();
+      const grad = ctx.createLinearGradient(x, y, x + width, y + height);
+      grad.addColorStop(0, '#d4c6b1');
+      grad.addColorStop(1, '#ece2d3');
+      rounded(x, y, width, height, 10, grad);
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(x, y, width, height, 10);
+      ctx.clip();
+      ctx.fillStyle = '#e6dbca';
+      ctx.fillRect(x + width * .57, y, width * .43, height * .5);
+      for (let i = 0; i < 3; i += 1) {
+        line(x + width * (.64 + i * .12), y, x + width * (.64 + i * .12), y + height * .48, 'rgba(255,255,255,.4)', 2);
+      }
+      ctx.fillStyle = '#9a755a';
+      ctx.fillRect(x + width * .14, y + height * .60, width * .65, height * .2);
+      rounded(x + width * .11, y + height * .45, width * .18, height * .28, 13, '#bea287');
+      rounded(x + width * .40, y + height * .48, width * .36, height * .26, 15, '#ae8b71');
+      ctx.fillStyle = '#f5eee2';
+      ctx.fillRect(x + width * .06, y + height * .79, width * .89, height * .04);
+      rounded(x + width * .19, y + height * .52, width * .15, height * .12, 8, '#e3d4bf');
+      rounded(x + width * .55, y + height * .53, width * .13, height * .12, 8, '#e4d7c4');
+      ctx.fillStyle = '#7e896d';
+      ctx.beginPath();
+      ctx.ellipse(x + width * .85, y + height * .39, width * .035, height * .15, .1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#79866d';
+      ctx.beginPath();
+      ctx.ellipse(x + width * .79, y + height * .31, width * .055, height * .10, -.5, 0, Math.PI * 2);
+      ctx.ellipse(x + width * .90, y + height * .26, width * .05, height * .11, .5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      const wash = .04 + .035 * (Math.sin(t * 1.1) + 1);
+      ctx.fillStyle = `rgba(255,255,255,${wash})`;
+      ctx.fillRect(x, y, width, height);
+      ctx.restore();
+    }
+
+    function drawOpening(t) {
+      rounded(637 + Math.sin(t * .55) * 4, 130, 540, 466, 20, '#fffdf9');
+      label('SSTE STUDIO', 670, 164, '700 11px "Segoe UI", Arial, sans-serif', palette.green);
+      label('New season · considered living', 670, 185, '400 9px "Segoe UI", Arial, sans-serif', palette.muted);
+      label('Make room for', 670, 226, '500 29px Georgia, serif', palette.ink);
+      label('what matters.', 670, 261, '500 29px Georgia, serif', palette.ink);
+      drawLivingRoom(670, 280, 474, 220, t);
+      label('Quiet objects, made for everyday rituals.', 670, 525, '400 11px "Segoe UI", Arial, sans-serif', palette.muted);
+      rounded(670, 546, 113, 30, 15, palette.green);
+      label('Explore the edit', 726, 565, '600 9px "Segoe UI", Arial, sans-serif', palette.white, 'center');
+      rounded(1022, 532, 120, 46, 12, '#f4eee5');
+      label('THOUGHTFULLY', 1082, 549, '700 8px "Segoe UI", Arial, sans-serif', palette.orange, 'center');
+      label('CURATED', 1082, 564, '600 8px "Segoe UI", Arial, sans-serif', palette.ink, 'center');
+    }
+
+    function drawStore(t) {
+      drawBrowser(598, 128, 604, 492, t, { url: 'sstestudio.in / collections' });
+      label('SSTE STUDIO', 620, 191, '700 9px "Segoe UI", Arial, sans-serif', palette.green);
+      label('Furniture    Lighting    Decor    Storage', 1180, 191, '500 8px "Segoe UI", Arial, sans-serif', palette.muted, 'right');
+      drawLivingRoom(621, 209, 557, 212, t);
+      rounded(644, 334, 189, 68, 10, 'rgba(255,253,249,.90)');
+      label('THE LIVING EDIT', 660, 357, '700 8px "Segoe UI", Arial, sans-serif', palette.orange);
+      label('A softer kind of home.', 660, 382, '500 18px Georgia, serif', palette.ink);
+      const cards = [
+        ['Linen lounge cushion', '₹ 1,490', '#d7c3a9'],
+        ['Sculpted table lamp', '₹ 2,850', '#d7d6ca'],
+        ['Oak catch-all tray', '₹ 890', '#b89b78'],
+      ];
+      cards.forEach((item, i) => {
+        const x = 621 + i * 185;
+        rounded(x, 435, 172, 126, 9, '#f7f5f0');
+        rounded(x + 12, 447, 148, 63, 6, item[2]);
+        if (i === 0) {
+          rounded(x + 53, 461, 65, 32, 11, '#eee7db');
+          rounded(x + 62, 455, 45, 9, 6, '#f7efe3');
+        } else if (i === 1) {
+          rounded(x + 74, 455, 5, 38, 3, '#f7f3e9');
+          rounded(x + 63, 450, 27, 12, 8, '#f7f3e9');
+          rounded(x + 63, 489, 27, 5, 2, '#736654');
+        } else {
+          rounded(x + 47, 463, 56, 26, 4, '#d6bf9d');
+        }
+        label(item[0], x + 12, 532, '550 9px "Segoe UI", Arial, sans-serif', palette.ink);
+        label(item[1], x + 12, 550, '700 9px "Segoe UI", Arial, sans-serif', palette.green);
+        if (i === 0) {
+          const pulse = .65 + .35 * Math.sin(t * 2.2);
+          dot(x + 153, 541, 10 + pulse * 3, `rgba(53,91,73,${.12 + pulse * .1})`);
+          dot(x + 153, 541, 3, palette.green);
+        }
+      });
+      drawCursor(621 + 90 * (0.5 + 0.5 * Math.sin(t * .8)), 490 + 8 * Math.cos(t), t);
+    }
+
+    function drawInsights(t) {
+      drawBrowser(585, 126, 620, 496, t, { url: 'sstestudio.in / admin / analytics' });
+      ctx.fillStyle = '#f4f6f2';
+      ctx.fillRect(585, 165, 143, 457);
+      rounded(603, 183, 108, 26, 6, palette.green);
+      label('SSTE  STUDIO', 614, 200, '700 8px "Segoe UI", Arial, sans-serif', palette.white);
+      ['Overview', 'Orders', 'Products', 'Inventory', 'Customers', 'Reports'].forEach((item, i) => {
+        const y = 242 + i * 39;
+        if (i === 0) rounded(598, y - 19, 117, 29, 6, '#e4ebe3');
+        dot(612, y - 4, 3, i === 0 ? palette.green : '#b2b6aa');
+        label(item, 624, y, '500 9px "Segoe UI", Arial, sans-serif', i === 0 ? palette.green : palette.muted);
+      });
+      label('Business overview', 749, 201, '600 17px Georgia, serif', palette.ink);
+      label('A clear view of the selected period', 750, 220, '400 8px "Segoe UI", Arial, sans-serif', palette.muted);
+      ['Net collections', 'Paid orders', 'Average order'].forEach((title, i) => {
+        const x = 750 + i * 139;
+        rounded(x, 239, 127, 75, 9, palette.white, palette.line);
+        label(title, x + 11, 259, '500 8px "Segoe UI", Arial, sans-serif', palette.muted);
+        const ends = ['₹ 2.4L', '128', '₹ 1,890'];
+        label(ends[i], x + 11, 286, '700 17px Georgia, serif', palette.ink);
+        const change = ['+12.4%', '+8.2%', '+3.8%'];
+        label(change[i], x + 11, 302, '700 7px "Segoe UI", Arial, sans-serif', palette.green);
+      });
+      rounded(750, 329, 421, 157, 9, palette.white, palette.line);
+      label('Collections over time', 768, 354, '650 9px "Segoe UI", Arial, sans-serif', palette.ink);
+      label('Illustrative 30-day view', 1150, 354, '400 7px "Segoe UI", Arial, sans-serif', palette.muted, 'right');
+      for (let i = 0; i < 3; i += 1) line(771, 379 + i * 34, 1150, 379 + i * 34, '#efeee8');
+      const points = 26;
+      ctx.beginPath();
+      for (let i = 0; i < points; i += 1) {
+        const x = 773 + i * 14.8;
+        const base = 455 - 25 * Math.sin(i * .39) - (i % 6) * 6;
+        const reveal = easeOut((t * .18 - i / points * .65));
+        const y = 455 + (base - 455) * reveal + Math.sin(t * 2 + i) * 2;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = palette.green;
+      ctx.lineWidth = 2.7;
+      ctx.stroke();
+      const lastX = 773 + (points - 1) * 14.8;
+      dot(lastX, 414 + Math.sin(t * 2) * 2, 5, palette.green);
+      dot(lastX, 414 + Math.sin(t * 2) * 2, 10, 'rgba(53,91,73,.13)');
+      rounded(750, 499, 421, 89, 9, '#f7f7f3');
+      label('WHAT’S SHAPING THE PERIOD', 768, 521, '700 7px "Segoe UI", Arial, sans-serif', palette.orange);
+      label('Products    Regions    Fulfillment    Customer feedback', 768, 544, '500 9px "Segoe UI", Arial, sans-serif', palette.ink);
+      label('Sample figures for demonstration', 768, 566, '400 7px "Segoe UI", Arial, sans-serif', palette.muted);
+      drawCursor(923 + 55 * Math.sin(t * .6), 397, t);
+    }
+
+    function drawQr(x, y, size, seed) {
+      rounded(x, y, size, size, 4, palette.white, '#d8d6cf');
+      const cells = 19;
+      const cell = (size - 12) / cells;
+      let code = seed;
+      const finder = (r, c, row, col) => {
+        const dr = r - row;
+        const dc = c - col;
+        if (dr < 0 || dr > 6 || dc < 0 || dc > 6) return null;
+        return dr === 0 || dr === 6 || dc === 0 || dc === 6 || (dr >= 2 && dr <= 4 && dc >= 2 && dc <= 4);
+      };
+      for (let r = 0; r < cells; r += 1) {
+        for (let c = 0; c < cells; c += 1) {
+          const marks = [finder(r, c, 0, 0), finder(r, c, 0, cells - 7), finder(r, c, cells - 7, 0)];
+          if (marks.some((value) => value !== null)) {
+            if (marks.includes(true)) rounded(x + 6 + c * cell, y + 6 + r * cell, Math.ceil(cell), Math.ceil(cell), 0, palette.ink);
+          } else {
+            code = (code * 16807) % 2147483647;
+            if (code % 3 === 0 || (r + c) % 7 === 0) rounded(x + 6 + c * cell, y + 6 + r * cell, Math.ceil(cell), Math.ceil(cell), 0, palette.ink);
+          }
+        }
+      }
+    }
+
+    function drawInventory(t) {
+      drawBrowser(593, 127, 613, 495, t, { url: 'sstestudio.in / admin / inventory' });
+      label('Inventory', 617, 201, '600 17px Georgia, serif', palette.ink);
+      label('Every tracked piece. Every handoff.', 617, 221, '400 8px "Segoe UI", Arial, sans-serif', palette.muted);
+      rounded(1025, 184, 154, 28, 7, palette.green);
+      label('Print unit labels', 1102, 202, '650 8px "Segoe UI", Arial, sans-serif', palette.white, 'center');
+      rounded(615, 239, 567, 300, 9, palette.white, palette.line);
+      const columns = [638, 841, 947, 1042, 1138];
+      ['ITEM / UNIT ID', 'SKU', 'STATUS', 'EVENTS', 'QR'].forEach((title, i) => label(title, columns[i], 264, '700 7px "Segoe UI", Arial, sans-serif', palette.muted));
+      line(615, 277, 1182, 277, palette.line);
+      const units = [
+        ['Linen lounge cushion', 'U-0124', 'AVAILABLE', 'Stock received'],
+        ['Linen lounge cushion', 'U-0125', 'RESERVED', 'Order reserved'],
+        ['Sculpted table lamp', 'U-0031', 'SOLD', 'Order fulfilled'],
+      ];
+      units.forEach((unit, i) => {
+        const y = 308 + i * 74;
+        if (i === 1) rounded(620, y - 19, 557, 65, 6, '#fbf8f1');
+        label(unit[0], 638, y, '600 8px "Segoe UI", Arial, sans-serif', palette.ink);
+        label(unit[1], 638, y + 16, '500 7px Consolas, monospace', palette.muted);
+        label(i === 2 ? 'LAMP-04' : 'CUSH-12', columns[1], y + 4, '500 8px "Segoe UI", Arial, sans-serif', palette.muted);
+        const colors = [palette.green, '#ab7a42', palette.red];
+        rounded(columns[2] - 5, y - 10, 77, 19, 9, i === 1 ? '#f1e7d7' : '#e8eee7');
+        label(unit[2], columns[2] + 33, y + 3, '700 7px "Segoe UI", Arial, sans-serif', colors[i], 'center');
+        label(unit[3], columns[3], y + 4, '500 7px "Segoe UI", Arial, sans-serif', palette.muted);
+        drawQr(columns[4], y - 13, 42, 79 + i * 12);
+        line(630, y + 35, 1171, y + 35, '#efeee9');
+      });
+      rounded(615, 553, 567, 42, 8, '#edf1e9');
+      label('ONE SKU', 635, 579, '700 8px "Segoe UI", Arial, sans-serif', palette.green);
+      label('→', 700, 579, '600 13px Georgia, serif', palette.orange);
+      label('UNIQUE PHYSICAL UNITS', 725, 579, '700 8px "Segoe UI", Arial, sans-serif', palette.green);
+      const scanX = 623 + ((t * 170) % 548);
+      ctx.save();
+      ctx.globalAlpha = .45;
+      line(scanX, 286, scanX, 511, palette.orange, 2);
+      ctx.restore();
+      drawCursor(1100, 485 + 7 * Math.sin(t * 1.2), t);
+    }
+
+    function drawDispatch(t) {
+      drawBrowser(592, 126, 615, 495, t, { url: 'sstestudio.in / admin / logistics' });
+      label('Logistics desk', 617, 200, '600 17px Georgia, serif', palette.ink);
+      label('An intentional handoff from owner to delivery staff.', 618, 220, '400 8px "Segoe UI", Arial, sans-serif', palette.muted);
+      rounded(616, 239, 564, 72, 8, '#f5f5f0');
+      label('PAID ORDER', 636, 261, '700 7px "Segoe UI", Arial, sans-serif', palette.orange);
+      label('Order #ST-2048', 636, 284, '600 12px Georgia, serif', palette.ink);
+      label('2 serialized items  ·  Pune, MH', 805, 279, '500 8px "Segoe UI", Arial, sans-serif', palette.muted);
+      rounded(1045, 254, 115, 30, 15, palette.green);
+      label('Assign staff', 1102, 274, '650 8px "Segoe UI", Arial, sans-serif', palette.white, 'center');
+      label('DELIVERY JOURNEY', 618, 345, '700 8px "Segoe UI", Arial, sans-serif', palette.muted);
+      const steps = [
+        ['Assigned', 'Owner dispatches'],
+        ['Picked up', 'Scan every unit'],
+        ['In transit', 'Recorded event'],
+        ['Delivered', 'Recipient confirms'],
+      ];
+      const positions = [653, 819, 985, 1150];
+      line(positions[0], 392, positions[3], 392, '#daddd3', 3);
+      const active = (t * .13) % 4;
+      line(positions[0], 392, positions[0] + (positions[3] - positions[0]) * Math.min(1, active / 3), 392, palette.green, 3);
+      steps.forEach((item, i) => {
+        const done = i < active;
+        const pulse = i === Math.floor(active);
+        dot(positions[i], 392, pulse ? 12 + 2 * Math.sin(t * 3) : 9, done || pulse ? palette.green : '#daddd3');
+        if (pulse) dot(positions[i], 392, 3, palette.white);
+        label(item[0], positions[i], 425, '650 8px "Segoe UI", Arial, sans-serif', done || pulse ? palette.ink : palette.muted, 'center');
+        label(item[1], positions[i], 444, '400 7px "Segoe UI", Arial, sans-serif', palette.muted, 'center');
+      });
+      rounded(616, 468, 343, 112, 9, '#f4f6f1');
+      label('ASSIGNED DELIVERY STAFF', 634, 493, '700 7px "Segoe UI", Arial, sans-serif', palette.muted);
+      rounded(634, 507, 33, 33, 17, '#e1e9df');
+      label('AK', 650, 529, '700 10px "Segoe UI", Arial, sans-serif', palette.green, 'center');
+      label('Aarav K.', 678, 521, '650 9px "Segoe UI", Arial, sans-serif', palette.ink);
+      label('Active route · 1 assigned order', 678, 539, '400 7px "Segoe UI", Arial, sans-serif', palette.muted);
+      rounded(971, 468, 209, 112, 9, '#fcf7f0');
+      label('SAFE DELIVERY CHECK', 989, 493, '700 7px "Segoe UI", Arial, sans-serif', palette.orange);
+      rounded(990, 510, 33, 38, 8, '#f0e3d1');
+      label('✓', 1007, 536, '700 17px "Segoe UI", Arial, sans-serif', palette.green, 'center');
+      label('Recipient PIN', 1034, 521, '650 9px "Segoe UI", Arial, sans-serif', palette.ink);
+      label('Confirm at handoff', 1034, 539, '400 7px "Segoe UI", Arial, sans-serif', palette.muted);
+      drawCursor(1101 + Math.sin(t * .7) * 22, 269, t);
+    }
+
+    function drawCare(t) {
+      drawBrowser(592, 127, 615, 494, t, { url: 'sstestudio.in / admin / customer care' });
+      label('Closer to your customers', 617, 200, '600 17px Georgia, serif', palette.ink);
+      label('Support conversations and feedback, in one owner view.', 618, 220, '400 8px "Segoe UI", Arial, sans-serif', palette.muted);
+      rounded(617, 239, 345, 313, 9, palette.white, palette.line);
+      label('SUPPORT INBOX', 636, 262, '700 8px "Segoe UI", Arial, sans-serif', palette.green);
+      const tickets = [
+        ['Order delivery question', 'Order-linked · awaiting reply', 'OPEN'],
+        ['Product care instructions', 'Customer conversation', 'REPLIED'],
+        ['Exchange request', 'Private support thread', 'OPEN'],
+      ];
+      tickets.forEach((item, i) => {
+        const y = 296 + i * 73;
+        rounded(635, y - 17, 30, 30, 9, ['#ebdfd3', '#e3e9dd', '#f0e7d5'][i]);
+        label(['M', 'R', 'S'][i], 650, y + 3, '700 9px "Segoe UI", Arial, sans-serif', palette.green, 'center');
+        label(item[0], 678, y - 1, '600 9px "Segoe UI", Arial, sans-serif', palette.ink);
+        label(item[1], 678, y + 17, '400 7px "Segoe UI", Arial, sans-serif', palette.muted);
+        rounded(862, y - 13, 78, 18, 9, i === 1 ? '#e7eee5' : '#f6eee3');
+        label(item[2], 901, y, '700 6px "Segoe UI", Arial, sans-serif', i === 1 ? palette.green : palette.orange, 'center');
+        line(636, y + 36, 944, y + 36, '#efeee9');
+      });
+      rounded(978, 239, 204, 313, 9, '#f1f3ee');
+      rounded(997, 260, 165, 37, 7, palette.white);
+      label('OPTIONAL GEMINI BI', 1010, 276, '700 7px "Segoe UI", Arial, sans-serif', palette.orange);
+      label('Report insight', 1010, 287, '500 7px "Segoe UI", Arial, sans-serif', palette.muted);
+      label('What stands out this period?', 998, 326, '600 11px Georgia, serif', palette.ink);
+      rounded(997, 344, 164, 109, 8, palette.white);
+      label('AGGREGATE EVIDENCE', 1010, 365, '700 6px "Segoe UI", Arial, sans-serif', palette.muted);
+      ['Lighting demand is rising', 'in two regions. Compare', 'stock cover before the', 'next replenishment.'].forEach((row, i) => {
+        label(row, 1010, 386 + i * 15, '500 8px "Segoe UI", Arial, sans-serif', palette.ink);
+      });
+      rounded(997, 466, 164, 63, 8, '#e6ece3');
+      label('Advisory only', 1010, 489, '700 8px "Segoe UI", Arial, sans-serif', palette.green);
+      label('Customer identities stay out', 1010, 505, '400 6px "Segoe UI", Arial, sans-serif', palette.muted);
+      label('AI IS OPTIONAL · ANALYTICS WORKS WITHOUT IT', 617, 584, '650 7px "Segoe UI", Arial, sans-serif', palette.muted);
+      const shimmer = .3 + .28 * (Math.sin(t * 1.8) + 1);
+      rounded(994, 566, 166, 3, 2, `rgba(188,129,81,${shimmer})`);
+    }
+
+    function drawClosing(t) {
+      const background = ctx.createLinearGradient(585, 130, 1205, 620);
+      background.addColorStop(0, '#355947');
+      background.addColorStop(1, '#23392e');
+      rounded(598, 128, 604, 492, 18, background);
+      const glow = ctx.createRadialGradient(1080, 251, 8, 1080, 251, 300);
+      glow.addColorStop(0, 'rgba(219,187,146,.25)');
+      glow.addColorStop(1, 'rgba(219,187,146,0)');
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(598, 128, 604, 492, 18);
+      ctx.clip();
+      ctx.fillStyle = glow;
+      ctx.fillRect(598, 128, 604, 492);
+      ctx.restore();
+      rounded(658, 189, 54, 54, 14, '#f4eee6');
+      label('S', 685, 226, '600 34px Georgia, serif', palette.green, 'center');
+      label('One connected store.', 657, 307, '500 28px Georgia, serif', palette.white);
+      label('Many thoughtful details.', 657, 346, '500 28px Georgia, serif', '#e3ccb0');
+      const items = [['01', 'STOREFRONT'], ['02', 'INTELLIGENCE'], ['03', 'UNIQUE ITEM QR'], ['04', 'FULFILLMENT']];
+      items.forEach((item, i) => {
+        const x = 660 + (i % 2) * 232;
+        const y = 399 + Math.floor(i / 2) * 62;
+        rounded(x, y, 210, 46, 10, 'rgba(255,255,255,.085)', 'rgba(255,255,255,.13)');
+        label(item[0], x + 14, y + 28, '700 8px "Segoe UI", Arial, sans-serif', '#d5af83');
+        label(item[1], x + 45, y + 28, '650 8px "Segoe UI", Arial, sans-serif', palette.white);
+      });
+      const orbX = 1098 + Math.sin(t * .5) * 9;
+      dot(orbX, 565, 24, 'rgba(236,221,200,.14)');
+      dot(orbX, 565, 14, 'rgba(236,221,200,.26)');
+      dot(orbX, 565, 5, '#e4c69f');
+    }
+
+    function drawCursor(x, y, t) {
+      const click = Math.max(0, 1 - ((t * 1.5) % 2.4));
+      if (click > .8) {
+        ctx.beginPath();
+        ctx.arc(x, y, 5 + (click - .8) * 45, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(188,129,81,${(.99 - click) * 3.4})`;
+        ctx.lineWidth = 1.4;
+        ctx.stroke();
+      }
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(-.14);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(1, 21);
+      ctx.lineTo(6, 15);
+      ctx.lineTo(11, 24);
+      ctx.lineTo(15, 22);
+      ctx.lineTo(10, 13);
+      ctx.lineTo(18, 12);
+      ctx.closePath();
+      ctx.fillStyle = '#fffdf9';
+      ctx.fill();
+      ctx.strokeStyle = palette.ink;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawFrame(elapsed) {
+      const total = SCENE_DURATION * scenes.length;
+      const safe = Number.isFinite(elapsed) ? Math.max(0, Math.min(total - 1, elapsed)) : 0;
+      const index = Math.min(scenes.length - 1, Math.floor(safe / SCENE_DURATION));
+      const local = safe - index * SCENE_DURATION;
+      const seconds = local / 1000;
+      drawBackdrop(seconds, index);
+      drawBrand(seconds);
+
+      const inset = easeOut(local / 720);
+      if (index === 0) {
+        drawCopy(scenes[index], local);
+        ctx.save();
+        ctx.globalAlpha = inset;
+        ctx.translate((1 - inset) * 34, (1 - inset) * 7);
+        drawOpening(seconds);
+        ctx.restore();
+      } else if (index === 1) {
+        drawCopy(scenes[index], local);
+        ctx.save();
+        ctx.globalAlpha = inset;
+        ctx.translate((1 - inset) * 34, (1 - inset) * 7);
+        drawStore(seconds);
+        ctx.restore();
+      } else if (index === 2) {
+        drawCopy(scenes[index], local);
+        ctx.save();
+        ctx.globalAlpha = inset;
+        ctx.translate((1 - inset) * 34, (1 - inset) * 7);
+        drawInsights(seconds);
+        ctx.restore();
+      } else if (index === 3) {
+        drawCopy(scenes[index], local);
+        ctx.save();
+        ctx.globalAlpha = inset;
+        ctx.translate((1 - inset) * 34, (1 - inset) * 7);
+        drawInventory(seconds);
+        ctx.restore();
+      } else if (index === 4) {
+        drawCopy(scenes[index], local);
+        ctx.save();
+        ctx.globalAlpha = inset;
+        ctx.translate((1 - inset) * 34, (1 - inset) * 7);
+        drawDispatch(seconds);
+        ctx.restore();
+      } else if (index === 5) {
+        drawCopy(scenes[index], local);
+        ctx.save();
+        ctx.globalAlpha = inset;
+        ctx.translate((1 - inset) * 34, (1 - inset) * 7);
+        drawCare(seconds);
+        ctx.restore();
+      } else {
+        drawCopy(scenes[index], local);
+        ctx.save();
+        ctx.globalAlpha = inset;
+        ctx.translate((1 - inset) * 34, (1 - inset) * 7);
+        drawClosing(seconds);
+        ctx.restore();
+      }
+      drawProgress(index, local);
+    }
+
+    let previewStart = 0;
+    let previewing = false;
+    function previewFrame(now) {
+      if (!previewing) return;
+      const elapsed = (now - previewStart) % (SCENE_DURATION * scenes.length);
+      drawFrame(elapsed);
+      requestAnimationFrame(previewFrame);
+    }
+
+    previewButton.addEventListener('click', () => {
+      previewing = !previewing;
+      if (previewing) {
+        previewButton.textContent = 'Stop preview';
+        previewStart = performance.now();
+        requestAnimationFrame(previewFrame);
+      } else {
+        previewButton.textContent = 'Preview motion';
+        drawFrame(0);
+      }
+    });
+
+    recordButton.addEventListener('click', async () => {
+      if (!canvas.captureStream || !window.MediaRecorder) {
+        status.textContent = 'This browser cannot render video. Try the latest Edge or Chrome.';
+        return;
+      }
+      previewing = false;
+      previewButton.disabled = true;
+      previewButton.textContent = 'Preview motion';
+      recordButton.disabled = true;
+      if (downloadLink.href.startsWith('blob:')) URL.revokeObjectURL(downloadLink.href);
+      downloadLink.removeAttribute('href');
+      downloadLink.hidden = true;
+      progress.value = 0;
+      status.textContent = 'Rendering the product film… Keep this tab open for about one minute.';
+      const stream = canvas.captureStream(30);
+      const type = MediaRecorder.isTypeSupported('video/webm;codecs=vp8')
+        ? 'video/webm;codecs=vp8'
+        : MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+          ? 'video/webm;codecs=vp9'
+          : 'video/webm';
+      let recorder;
+      try {
+        recorder = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 3500000 });
+      } catch (error) {
+        stream.getTracks().forEach((track) => track.stop());
+        previewButton.disabled = false;
+        recordButton.disabled = false;
+        status.textContent = `Video recorder could not start: ${error.message}`;
+        return;
+      }
+      const chunks = [];
+      const startTime = performance.now();
+      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+      recorder.onerror = (event) => {
+        status.textContent = `Video rendering failed: ${event.error?.message || 'recorder error'}.`;
+        stream.getTracks().forEach((track) => track.stop());
+        previewButton.disabled = false;
+        recordButton.disabled = false;
+      };
+      recorder.onstop = async () => {
+        try {
+          const blob = new Blob(chunks, { type });
+          if (blob.size < 256_000) throw new Error('The rendered video is unexpectedly small. Try rendering again.');
+          const objectUrl = URL.createObjectURL(blob);
+          downloadLink.href = objectUrl;
+          downloadLink.download = 'business-owner-demo.webm';
+          downloadLink.hidden = false;
+          status.textContent = `The ${(blob.size / 1024 / 1024).toFixed(1)} MB film is ready to download.`;
+          progress.value = 100;
+          recordButton.disabled = false;
+        } catch (error) {
+          status.textContent = `${error.message} Keep this page open and render again.`;
+          recordButton.disabled = false;
+        } finally {
+          previewButton.disabled = false;
+          stream.getTracks().forEach((track) => track.stop());
+        }
+      };
+      recorder.start(1000);
+      function encodeFrame(now) {
+        const timestamp = Number.isFinite(now) ? now : performance.now();
+        const elapsed = timestamp - startTime;
+        drawFrame(elapsed);
+        progress.value = Math.min(100, elapsed / (SCENE_DURATION * scenes.length) * 100);
+        if (elapsed < SCENE_DURATION * scenes.length) requestAnimationFrame(encodeFrame);
+        else {
+          recorder.stop();
+          status.textContent = 'Finalizing the product film…';
+        }
+      }
+      requestAnimationFrame(encodeFrame);
+    });
+
+    drawFrame(0);
+  </script>
+</body>
+</html>

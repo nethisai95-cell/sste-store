@@ -4,24 +4,34 @@ const { GH_TOKEN, REPO, RUN_URL } = process.env;
 const tail = (file, n = 6000) => (existsSync(file) ? readFileSync(file, 'utf8').slice(-n) : '(no output)');
 const logs = `BUILD:\n${tail('build.log')}\n\nUNIT TESTS:\n${tail('unit.log')}\n\nAUDIT:\n${tail('audit.log', 2000)}`;
 
+const MODELS = ['openai/gpt-4.1', 'deepseek/deepseek-r1', 'meta/llama-3.3-70b-instruct', 'openai/gpt-4o-mini'];
+
 async function suggestFix() {
-  try {
-    const res = await fetch('https://models.github.ai/inference/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${GH_TOKEN}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'openai/gpt-4o-mini',
-        messages: [
-          { role: 'system', content: 'You are a senior engineer triaging a failed CI run for a React + Express ecommerce app. Give: 1) likely root cause, 2) the file(s) to change, 3) a suggested patch as a unified diff if confident. Be concise. Do not invent files.' },
-          { role: 'user', content: logs },
-        ],
-      }),
-    });
-    if (!res.ok) return `LLM unavailable (HTTP ${res.status}).`;
-    return (await res.json()).choices?.[0]?.message?.content ?? 'LLM returned no content.';
-  } catch (error) {
-    return `LLM unavailable: ${error.message}`;
+  const failures = [];
+  for (const model of MODELS) {
+    try {
+      const res = await fetch('https://models.github.ai/inference/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${GH_TOKEN}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: 'You are a senior engineer triaging a failed CI run for a React + Express ecommerce app. Give: 1) likely root cause, 2) the file(s) to change, 3) a suggested patch as a unified diff if confident. Be concise. Do not invent files.' },
+            { role: 'user', content: logs },
+          ],
+        }),
+      });
+      if (!res.ok) {
+        failures.push(`${model}: HTTP ${res.status}`);
+        continue;
+      }
+      const text = (await res.json()).choices?.[0]?.message?.content;
+      if (text) return `_Model: ${model}_\n\n${text.replace(/<think>[\s\S]*?<\/think>/g, '').trim()}`;
+    } catch (error) {
+      failures.push(`${model}: ${error.message}`);
+    }
   }
+  return `All free models unavailable (${failures.join('; ')}). Check the logs below.`;
 }
 
 const analysis = await suggestFix();

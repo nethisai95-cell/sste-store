@@ -1,5 +1,12 @@
 import 'dotenv/config';
-import { createHmac, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
+import {
+  createHmac,
+  randomBytes,
+  randomInt,
+  randomUUID,
+  scrypt as scryptCallback,
+  timingSafeEqual,
+} from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +26,10 @@ import {
   validateStoreTaxProfile,
 } from './finance-validation.js';
 import { validateCustomerCredentials, validateOrderRequest } from './order-validation.js';
+import {
+  recoveryProviderOptions,
+  sendRecoveryEmail,
+} from './recovery-providers.js';
 
 const { Pool } = pg;
 const scrypt = promisify(scryptCallback);
@@ -58,6 +69,12 @@ const validAnalyticsRanges = new Set([7, 30, 90, 365]);
 const validSupportCategories = new Set(['order', 'delivery', 'payment', 'product', 'return', 'other']);
 const validTicketStatuses = new Set(['open', 'in_progress', 'waiting_customer', 'resolved', 'closed']);
 const validEmployeeRoles = new Set(['manager', 'inventory', 'support', 'finance']);
+const validRecoveryAccountTypes = new Set(['customer', 'employee', 'delivery']);
+const recoveryAccountTables = {
+  customer: { table: 'customers', activeClause: '' },
+  employee: { table: 'employees', activeClause: ' AND active = TRUE' },
+  delivery: { table: 'delivery_agents', activeClause: ' AND active = TRUE' },
+};
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
 
@@ -125,6 +142,13 @@ const accountAuthLimiter = rateLimit({
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   handler: (_request, response) => response.status(429).json({ error: 'Too many account attempts. Try again in 15 minutes.' }),
+});
+const recoveryLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 6,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  handler: (_request, response) => response.status(429).json({ error: 'Too many recovery attempts. Try again in an hour.' }),
 });
 const supportLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -204,11 +228,22 @@ function requireAdminOrRoles(...roles) {
   };
 }
 
-function requireCustomer(request, response, next) {
+async function requireCustomer(request, response, next) {
   if (!request.session?.customerId) {
     return response.status(401).json({ error: 'Sign in to access your account.' });
   }
-  next();
+  try {
+    const { rows } = await pool.query(
+      'SELECT auth_version FROM customers WHERE id = $1',
+      [request.session.customerId],
+    );
+    if (!rows[0] || rows[0].auth_version !== request.session.customerAuthVersion) {
+      return response.status(401).json({ error: 'Your sign-in expired. Please sign in again.' });
+    }
+    next();
+  } catch (error) {
+    next(error);
+  }
 }
 
 async function requireDeliveryAgent(request, response, next) {
@@ -216,11 +251,14 @@ async function requireDeliveryAgent(request, response, next) {
   if (!agentId) return response.status(401).json({ error: 'Delivery staff sign-in required.' });
   try {
     const { rows } = await pool.query(
-      'SELECT id, name, email FROM delivery_agents WHERE id = $1 AND active = TRUE',
+      'SELECT id, name, email, auth_version AS "authVersion" FROM delivery_agents WHERE id = $1 AND active = TRUE',
       [agentId],
     );
     if (!rows[0]) {
       return response.status(401).json({ error: 'This delivery account is inactive. Contact the store owner.' });
+    }
+    if (rows[0].authVersion !== request.session.deliveryAgentAuthVersion) {
+      return response.status(401).json({ error: 'Your delivery session expired. Sign in again.' });
     }
     request.deliveryAgent = rows[0];
     next();
@@ -240,6 +278,7 @@ async function createCustomerSession(request, customer) {
   });
   request.session.customerId = customer.id;
   request.session.customerEmail = customer.email;
+  request.session.customerAuthVersion = customer.authVersion ?? 1;
   await new Promise((resolve, reject) => {
     request.session.save((error) => error ? reject(error) : resolve());
   });
@@ -256,6 +295,54 @@ async function hashEmployeePassword(password) {
   const salt = randomBytes(16);
   const digest = await scrypt(password, salt, 64);
   return { salt: salt.toString('hex'), hash: digest.toString('hex') };
+}
+
+function hashRecoveryCode(code) {
+  return createHmac('sha256', process.env.SESSION_SECRET).update(code).digest('hex');
+}
+
+function validRecoveryEmail(email) {
+  return typeof email === 'string' &&
+    email.length <= 254 &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+async function findRecoveryAccount(accountType, email) {
+  const account = recoveryAccountTables[accountType];
+  if (!account) return null;
+  const { rows } = await pool.query(
+    `SELECT id, email FROM ${account.table}
+     WHERE email = $1${account.activeClause}`,
+    [email],
+  );
+  return rows[0] || null;
+}
+
+async function resetRecoveryAccountPassword(accountType, accountId, password, client) {
+  const { salt, hash } = await hashEmployeePassword(password);
+  const account = recoveryAccountTables[accountType];
+  const { rows } = await client.query(
+    `UPDATE ${account.table}
+     SET password_salt = $1, password_hash = $2, auth_version = auth_version + 1
+     WHERE id = $3${account.activeClause}
+     RETURNING id, email`,
+    [salt, hash, accountId],
+  );
+  if (rows[0]) {
+    await client.query(
+      `UPDATE account_recovery_tokens SET used_at = NOW()
+       WHERE account_type = $1 AND account_id = $2 AND used_at IS NULL`,
+      [accountType, accountId],
+    );
+    if (accountType === 'employee') {
+      await client.query(
+        `INSERT INTO employee_events (id, employee_id, actor_email, event_type, detail)
+         VALUES ($1, $2, $3, 'password_reset', 'Self-service account recovery')`,
+        [randomUUID(), accountId, rows[0].email],
+      );
+    }
+  }
+  return Boolean(rows[0]);
 }
 
 const orderSelect = `
@@ -890,14 +977,133 @@ app.put('/api/admin/tax-profile', requireAdmin, async (request, response, next) 
   }
 });
 
-app.get('/api/account/session', (request, response) => {
-  const authenticated = Boolean(request.session?.customerId);
-  response.json({
-    authenticated,
-    customer: authenticated
-      ? { id: request.session.customerId, email: request.session.customerEmail }
-      : null,
-  });
+app.get('/api/account/session', async (request, response, next) => {
+  const customerId = request.session?.customerId;
+  if (!customerId) return response.json({ authenticated: false, customer: null });
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, email, auth_version AS "authVersion" FROM customers WHERE id = $1',
+      [customerId],
+    );
+    if (!rows[0] || rows[0].authVersion !== request.session.customerAuthVersion) {
+      return response.json({ authenticated: false, customer: null });
+    }
+    response.json({
+      authenticated: true,
+      customer: { id: rows[0].id, email: rows[0].email },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/recovery/options', (_request, response) => {
+  response.json({ emailEnabled: recoveryProviderOptions.emailEnabled });
+});
+
+app.post('/api/recovery/email/request', recoveryLimiter, async (request, response, next) => {
+  const accountType = request.body?.accountType;
+  const email = typeof request.body?.email === 'string' ? request.body.email.trim().toLowerCase() : '';
+  if (!validRecoveryAccountTypes.has(accountType) || !validRecoveryEmail(email)) {
+    return response.status(400).json({ error: 'Enter a valid email and account type.' });
+  }
+  if (!recoveryProviderOptions.emailEnabled) {
+    return response.status(503).json({ error: 'Email recovery is not configured. Contact the store owner.' });
+  }
+  try {
+    const account = await findRecoveryAccount(accountType, email);
+    if (account) {
+      const code = String(randomInt(0, 1000000)).padStart(6, '0');
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(
+          `DELETE FROM account_recovery_tokens
+           WHERE created_at < NOW() - INTERVAL '7 days'`,
+        );
+        await client.query(
+          `UPDATE account_recovery_tokens SET used_at = NOW()
+           WHERE account_type = $1 AND account_id = $2 AND used_at IS NULL`,
+          [accountType, account.id],
+        );
+        await client.query(
+          `INSERT INTO account_recovery_tokens
+           (id, account_type, account_id, token_hash, expires_at)
+           VALUES ($1, $2, $3, $4, NOW() + INTERVAL '15 minutes')`,
+          [randomUUID(), accountType, account.id, hashRecoveryCode(code)],
+        );
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw error;
+      } finally {
+        client.release();
+      }
+      await sendRecoveryEmail({ to: email, code, accountType });
+    }
+    response.status(202).json({
+      accepted: true,
+      message: 'If an active account matches that email, a password reset code will be sent.',
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/recovery/email/complete', recoveryLimiter, async (request, response, next) => {
+  const accountType = request.body?.accountType;
+  const email = typeof request.body?.email === 'string' ? request.body.email.trim().toLowerCase() : '';
+  const code = typeof request.body?.code === 'string' ? request.body.code.trim() : '';
+  const password = typeof request.body?.password === 'string' ? request.body.password : '';
+  if (
+    !validRecoveryAccountTypes.has(accountType) || !validRecoveryEmail(email) ||
+    !/^\d{6}$/.test(code) || password.length < 12 || password.length > 256
+  ) {
+    return response.status(400).json({ error: 'Enter the email, six-digit code, and a password of 12 to 256 characters.' });
+  }
+  try {
+    const account = await findRecoveryAccount(accountType, email);
+    if (!account) return response.status(400).json({ error: 'The code is invalid, expired, or already used.' });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows } = await client.query(
+        `SELECT id, token_hash FROM account_recovery_tokens
+         WHERE account_type = $1 AND account_id = $2 AND used_at IS NULL
+           AND expires_at > NOW() AND attempts < 5
+         ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+        [accountType, account.id],
+      );
+      const token = rows[0];
+      const suppliedHash = Buffer.from(hashRecoveryCode(code), 'hex');
+      const expectedHash = token ? Buffer.from(token.token_hash, 'hex') : Buffer.alloc(32);
+      const codeMatches = token && timingSafeEqual(expectedHash, suppliedHash);
+      if (!codeMatches) {
+        if (token) {
+          await client.query(
+            'UPDATE account_recovery_tokens SET attempts = attempts + 1 WHERE id = $1',
+            [token.id],
+          );
+        }
+        await client.query('COMMIT');
+        return response.status(400).json({ error: 'The code is invalid, expired, or already used.' });
+      }
+      const updated = await resetRecoveryAccountPassword(accountType, account.id, password, client);
+      if (!updated) {
+        await client.query('ROLLBACK');
+        return response.status(400).json({ error: 'The account is no longer active. Contact the store owner.' });
+      }
+      await client.query('COMMIT');
+      response.json({ reset: true, message: 'Password reset. Sign in using your new password.' });
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post('/api/account/register', accountAuthLimiter, async (request, response, next) => {
@@ -907,7 +1113,7 @@ app.post('/api/account/register', accountAuthLimiter, async (request, response, 
   try {
     const salt = randomBytes(16);
     const digest = await scrypt(credentials.password, salt, 64);
-    const customer = { id: randomUUID(), email: credentials.email };
+    const customer = { id: randomUUID(), email: credentials.email, authVersion: 1 };
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -927,7 +1133,7 @@ app.post('/api/account/register', accountAuthLimiter, async (request, response, 
     response.status(201).json({ customer });
   } catch (error) {
     if (error.code === '23505') {
-      return response.status(409).json({ error: 'An account with that email already exists.' });
+      return response.status(409).json({ error: 'That email or verified mobile number already has an account.' });
     }
     next(error);
   }
@@ -939,7 +1145,7 @@ app.post('/api/account/login', accountAuthLimiter, async (request, response, nex
 
   try {
     const { rows } = await pool.query(
-      'SELECT id, email, password_salt, password_hash FROM customers WHERE email = $1',
+      'SELECT id, email, password_salt, password_hash, auth_version AS "authVersion" FROM customers WHERE email = $1',
       [credentials.email],
     );
     const customerRow = rows[0];
@@ -951,7 +1157,7 @@ app.post('/api/account/login', accountAuthLimiter, async (request, response, nex
       return response.status(401).json({ error: 'Email or password is incorrect.' });
     }
 
-    const customer = { id: customerRow.id, email: customerRow.email };
+    const customer = { id: customerRow.id, email: customerRow.email, authVersion: customerRow.authVersion };
     await createCustomerSession(request, customer);
     response.json({ customer });
   } catch (error) {
@@ -1726,7 +1932,7 @@ app.patch('/api/admin/employees/:id', requireAdmin, async (request, response, ne
         auth_version = auth_version + CASE WHEN $3 THEN 1 ELSE 0 END,
         updated_at = CASE WHEN $3 THEN NOW() ELSE updated_at END
        WHERE id = $4
-       RETURNING id, name, email, role, active, last_login_at AS "lastLoginAt",
+       RETURNING id, name, email, phone, role, active, last_login_at AS "lastLoginAt",
          created_at AS "createdAt", updated_at AS "updatedAt"`,
       [nextRole, nextActive, changed, request.params.id],
     );
@@ -2008,7 +2214,7 @@ app.patch('/api/admin/delivery/agents/:id', requireAdminOrRoles('manager'), asyn
   }
   try {
     const { rows } = await pool.query(
-      `UPDATE delivery_agents SET active = $1 WHERE id = $2
+      `UPDATE delivery_agents SET active = $1, auth_version = auth_version + 1 WHERE id = $2
        RETURNING id, name, email, active, created_at AS "createdAt"`,
       [request.body.active, request.params.id],
     );
@@ -2147,10 +2353,15 @@ app.get('/api/delivery/session', async (request, response, next) => {
   if (!agentId) return response.json({ authenticated: false, agent: null });
   try {
     const { rows } = await pool.query(
-      'SELECT id, name, email FROM delivery_agents WHERE id = $1 AND active = TRUE',
+      'SELECT id, name, email, auth_version AS "authVersion" FROM delivery_agents WHERE id = $1 AND active = TRUE',
       [agentId],
     );
-    response.json({ authenticated: Boolean(rows[0]), agent: rows[0] || null });
+    const agent = rows[0];
+    const authenticated = Boolean(agent && agent.authVersion === request.session.deliveryAgentAuthVersion);
+    response.json({
+      authenticated,
+      agent: authenticated ? { id: agent.id, name: agent.name, email: agent.email } : null,
+    });
   } catch (error) {
     next(error);
   }
@@ -2164,7 +2375,7 @@ app.post('/api/delivery/login', loginLimiter, async (request, response, next) =>
   }
   try {
     const { rows } = await pool.query(
-      'SELECT id, name, email, password_salt, password_hash FROM delivery_agents WHERE email = $1 AND active = TRUE',
+      'SELECT id, name, email, password_salt, password_hash, auth_version AS "authVersion" FROM delivery_agents WHERE email = $1 AND active = TRUE',
       [email],
     );
     const agent = rows[0];
@@ -2181,6 +2392,7 @@ app.post('/api/delivery/login', loginLimiter, async (request, response, next) =>
       request.session.regenerate((error) => error ? reject(error) : resolve());
     });
     request.session.deliveryAgentId = agent.id;
+    request.session.deliveryAgentAuthVersion = agent.authVersion;
     await new Promise((resolve, reject) => {
       request.session.save((error) => error ? reject(error) : resolve());
     });

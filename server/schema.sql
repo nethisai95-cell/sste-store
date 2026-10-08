@@ -30,8 +30,11 @@ CREATE TABLE IF NOT EXISTS customers (
   email VARCHAR(254) NOT NULL UNIQUE,
   password_salt CHAR(32) NOT NULL,
   password_hash CHAR(128) NOT NULL,
+  auth_version INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS auth_version INTEGER NOT NULL DEFAULT 1;
 
 CREATE TABLE IF NOT EXISTS orders (
   id UUID PRIMARY KEY,
@@ -154,9 +157,12 @@ CREATE TABLE IF NOT EXISTS delivery_agents (
   email VARCHAR(254) NOT NULL UNIQUE,
   password_salt CHAR(32) NOT NULL,
   password_hash CHAR(128) NOT NULL,
+  auth_version INTEGER NOT NULL DEFAULT 1,
   active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE delivery_agents ADD COLUMN IF NOT EXISTS auth_version INTEGER NOT NULL DEFAULT 1;
 
 CREATE TABLE IF NOT EXISTS deliveries (
   id UUID PRIMARY KEY,
@@ -375,6 +381,21 @@ CREATE TABLE IF NOT EXISTS employee_events (
 
 CREATE INDEX IF NOT EXISTS employee_events_employee_created_idx
   ON employee_events (employee_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS account_recovery_tokens (
+  id UUID PRIMARY KEY,
+  account_type VARCHAR(16) NOT NULL CHECK (account_type IN ('customer', 'employee', 'delivery')),
+  account_id UUID NOT NULL,
+  token_hash CHAR(64) NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  used_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS account_recovery_tokens_active_idx
+  ON account_recovery_tokens (account_type, account_id, expires_at DESC)
+  WHERE used_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS crm_contact_sync (
   customer_id UUID PRIMARY KEY REFERENCES customers(id) ON DELETE CASCADE,

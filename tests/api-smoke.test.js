@@ -49,6 +49,52 @@ test('public tax readiness exposes only a safe checkout flag', async () => {
   assert.equal(Object.hasOwn(body, 'legalName'), false);
 });
 
+test('recovery configuration exposes channel availability without credentials', async () => {
+  const { response, body } = await getJson('/api/recovery/options');
+  assert.equal(response.status, 200);
+  assert.deepEqual(Object.keys(body), ['emailEnabled']);
+  assert.equal(typeof body.emailEnabled, 'boolean');
+});
+
+test('email recovery endpoints validate inputs before attempting provider delivery', async () => {
+  const cases = [
+    ['/api/recovery/email/request', { accountType: 'owner', email: 'invalid' }],
+    ['/api/recovery/email/complete', { accountType: 'customer', email: 'invalid', code: '123', password: 'short' }],
+  ];
+  for (const [path, payload] of cases) {
+    const response = await fetch(new URL(path, apiBase), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    assert.equal(response.status, 400, path);
+    assert.equal(typeof (await response.json()).error, 'string', path);
+  }
+});
+
+test('email recovery fails explicitly when SMTP is not configured', async () => {
+  const { body: options } = await getJson('/api/recovery/options');
+  if (!options.emailEnabled) {
+    const response = await fetch(new URL('/api/recovery/email/request', apiBase), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accountType: 'customer', email: 'person@example.com' }),
+    });
+    assert.equal(response.status, 503);
+  }
+});
+
+test('SMS recovery endpoints are not enabled', async () => {
+  for (const path of ['/api/recovery/otp/send', '/api/recovery/otp/complete']) {
+    const response = await fetch(new URL(path, apiBase), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    assert.equal(response.status, 404, path);
+  }
+});
+
 test('anonymous session endpoints do not establish privileged accounts', async () => {
   const endpoints = [
     ['/api/admin/session', (body) => assert.equal(body.authenticated, false)],

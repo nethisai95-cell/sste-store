@@ -35,7 +35,13 @@ Start the API and Vite together:
 npm run dev
 ```
 
-Open `http://localhost:5173/` for the storefront, `http://localhost:5173/account` for customer sign-in/registration, order history, support, and feedback, and `http://localhost:5173/admin` for owner sign-in. Customer passwords must be at least 12 characters. On first API startup, the schema and starter products are created automatically; schema migrations add delivery, payment, inventory, support, and feedback data structures to existing databases. PostgreSQL sessions are stored in the database. The owner dashboard includes date-filtered sales and operations KPIs, a daily sales chart, product/region/order breakdowns, inventory alerts and movement history, a support inbox, feedback moderation, Razorpay setup status, and order fulfillment.
+Open `http://localhost:5173/` for the storefront, `http://localhost:5173/account` for customer sign-in/registration, order history, support, and feedback, and `http://localhost:5173/admin` for owner sign-in. Customer passwords must be at least 12 characters. On first API startup, the schema and starter products are created automatically; schema migrations add delivery, payment, inventory, support, recovery, and feedback data structures to existing databases. PostgreSQL sessions are stored in the database. The owner dashboard includes date-filtered sales and operations KPIs, a daily sales chart, product/region/order breakdowns, inventory alerts and movement history, a support inbox, feedback moderation, Razorpay setup status, and order fulfillment.
+
+### Account recovery
+
+Customer, employee, and delivery sign-in pages offer password recovery by email. Reset codes expire after 15 minutes, are single-use, and are rate-limited. Email requests return the same confirmation whether or not an account exists. If a user has forgotten the email address on the account, they must contact the store owner or customer support to verify their identity; the app does not disclose account emails. Owner account recovery remains owner-managed with `npm run admin:hash`.
+
+Email reset codes require a working SMTP account. Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, and `RECOVERY_EMAIL_FROM` in the private server environment. Keep these values out of browser variables and source control. Restart the API after changing provider configuration. Email recovery remains unavailable until SMTP is configured; the login pages display this clearly.
 
 ## Tests and quality checks
 
@@ -98,6 +104,6 @@ npm run build
 npm start
 ```
 
-Set `NODE_ENV=production`, use HTTPS, and provide production-only `DATABASE_URL`, `SESSION_SECRET`, `ADMIN_EMAIL`, and `ADMIN_PASSWORD_HASH` values through the deployment environment. The server serves the built frontend and API from the same origin. Never expose the database URL or owner password to Vite or browser code.
+Set `NODE_ENV=production`, use HTTPS, and provide production-only `DATABASE_URL`, `SESSION_SECRET`, `ADMIN_EMAIL`, and `ADMIN_PASSWORD_HASH` values through the deployment environment. Configure SMTP recovery credentials as required. The server serves the built frontend and API from the same origin. Never expose the database URL, owner password, or SMTP credentials to Vite or browser code.
 
-In local development, a separate test-only UPI simulation is available; successful simulation records `demo_paid` / `demo_upi`, while failed simulation places no order. The simulation never contacts a bank or UPI app and never moves money. Real Razorpay checkouts are available only when server-side credentials are configured. The app does not yet integrate cash on delivery, email notifications, carrier tracking, email verification, password reset/change, customer profile management, data import/export, or file uploads. Configure India-specific shipping, tax/GST, refund, privacy, and consumer-protection policies with the relevant business providers before production.
+In local development, a separate test-only UPI simulation is available; successful simulation records `demo_paid` / `demo_upi`, while failed simulation places no order. The simulation never contacts a bank or UPI app and never moves money. Real Razorpay checkouts are available only when server-side credentials are configured. The app does not yet integrate cash on delivery, general order email notifications, carrier tracking, customer profile management, data import/export, or file uploads. Configure India-specific shipping, tax/GST, refund, privacy, and consumer-protection policies with the relevant business providers before production.

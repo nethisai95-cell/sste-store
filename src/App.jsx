@@ -153,6 +153,126 @@ async function apiRequest(path, options = {}) {
   return result;
 }
 
+function AccountRecoveryPanel({ initialAccountType = 'customer', allowAccountTypeSelection = false, onBack }) {
+  const [options, setOptions] = useState(null);
+  const [stage, setStage] = useState('request');
+  const [accountType, setAccountType] = useState(
+    ['customer', 'employee', 'delivery'].includes(initialAccountType) ? initialAccountType : 'customer',
+  );
+  const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    apiRequest('/api/recovery/options')
+      .then((result) => { if (active) setOptions(result); })
+      .catch((requestError) => { if (active) setError(requestError.message); });
+    return () => { active = false; };
+  }, []);
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      if (stage === 'request') {
+        const result = await apiRequest('/api/recovery/email/request', {
+          method: 'POST',
+          body: JSON.stringify({ accountType, email }),
+        });
+        setNotice(result.message);
+        setStage('complete');
+        return;
+      }
+
+      const result = await apiRequest('/api/recovery/email/complete', {
+        method: 'POST',
+        body: JSON.stringify({ accountType, email, code, password }),
+      });
+      setNotice(result.message);
+      setStage('done');
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startOver = () => {
+    setStage('request');
+    setNotice('');
+    setError('');
+    setCode('');
+    setPassword('');
+  };
+
+  return (
+    <section className="account-recovery-panel" aria-labelledby="account-recovery-title">
+      <p className="eyebrow">Secure account access</p>
+      <h2 id="account-recovery-title">Recover your account</h2>
+      <p className="admin-login-copy">Reset your password using a one-time code sent to the email address on your account.</p>
+      {!options ? (
+        <>
+          <p role={error ? 'alert' : 'status'}>{error || 'Checking recovery options…'}</p>
+          {error && <button className="secondary-button" type="button" onClick={() => window.location.reload()}>Retry</button>}
+        </>
+      ) : (
+        <>
+          {!options.emailEnabled && (
+            <p className="admin-login-copy" role="status">Recovery delivery is not configured yet. Contact the store owner to reset your account.</p>
+          )}
+          <form className="admin-login-form" onSubmit={handleSubmit}>
+            {allowAccountTypeSelection && (
+              <label>Account type
+                <select value={accountType} onChange={(event) => setAccountType(event.target.value)}>
+                  <option value="customer">Customer</option>
+                  <option value="employee">Employee</option>
+                  <option value="delivery">Delivery staff</option>
+                </select>
+              </label>
+            )}
+            <label>Email address
+              <input type="email" autoComplete="email" required maxLength="254" value={email} onChange={(event) => setEmail(event.target.value)} />
+            </label>
+            {stage === 'complete' && (
+              <>
+                <label>Six-digit code
+                  <input inputMode="numeric" autoComplete="one-time-code" required pattern="[0-9]{6}" maxLength="6" value={code} onChange={(event) => setCode(event.target.value)} />
+                </label>
+                <label>New password
+                  <input type="password" autoComplete="new-password" required minLength="12" maxLength="256" value={password} onChange={(event) => setPassword(event.target.value)} />
+                </label>
+              </>
+            )}
+            {error && <p className="admin-login-error" role="alert">{error}</p>}
+            {notice && <p className="account-notice" role="status">{notice}</p>}
+            <p className="admin-login-copy">Forgot which email you used? Contact the store owner or customer support to verify your identity.</p>
+            <div className="admin-login-actions">
+              {stage === 'request' ? (
+                <button className="primary-button" type="submit" disabled={busy || !options.emailEnabled}>
+                  {busy ? 'Sending…' : 'Send reset code'}
+                </button>
+              ) : stage !== 'done' ? (
+                <>
+                  <button className="secondary-button" type="button" onClick={startOver}>Start over</button>
+                  <button className="primary-button" type="submit" disabled={busy}>{busy ? 'Verifying…' : 'Continue'}</button>
+                </>
+              ) : (
+                <button className="secondary-button" type="button" onClick={startOver}>Use another method</button>
+              )}
+              <button className="secondary-button" type="button" onClick={onBack}>Back to sign in</button>
+            </div>
+          </form>
+        </>
+      )}
+    </section>
+  );
+}
+
 function AdminSalesChart({ data }) {
   const width = 760;
   const height = 240;
@@ -257,6 +377,7 @@ function App() {
   const [employee, setEmployee] = useState(null);
   const [employeeCredentials, setEmployeeCredentials] = useState({ email: '', password: '' });
   const [employeeError, setEmployeeError] = useState('');
+  const [employeeRecovering, setEmployeeRecovering] = useState(false);
   const [employeeNotice, setEmployeeNotice] = useState('');
   const [employeeWorkspace, setEmployeeWorkspace] = useState(null);
   const [employeeProducts, setEmployeeProducts] = useState([]);
@@ -272,6 +393,7 @@ function App() {
   const [deliveryCredentials, setDeliveryCredentials] = useState({ email: '', password: '' });
   const [deliveryAssignments, setDeliveryAssignments] = useState([]);
   const [deliveryError, setDeliveryError] = useState('');
+  const [deliveryRecovering, setDeliveryRecovering] = useState(false);
   const [deliveryNotice, setDeliveryNotice] = useState('');
   const [deliveryPinDrafts, setDeliveryPinDrafts] = useState({});
   const [deliveryNoteDrafts, setDeliveryNoteDrafts] = useState({});
@@ -288,9 +410,7 @@ function App() {
   const [crmSyncing, setCrmSyncing] = useState(false);
   const [crmNotice, setCrmNotice] = useState('');
   const [adminEmployees, setAdminEmployees] = useState([]);
-  const [newEmployee, setNewEmployee] = useState({
-    name: '', email: '', role: 'inventory', password: '',
-  });
+  const [newEmployee, setNewEmployee] = useState({ name: '', email: '', role: 'inventory', password: '' });
   const [employeeResetDrafts, setEmployeeResetDrafts] = useState({});
   const [employeeEventLogs, setEmployeeEventLogs] = useState({});
   const [adminEmployeeNotice, setAdminEmployeeNotice] = useState('');
@@ -344,7 +464,9 @@ function App() {
   const [adminError, setAdminError] = useState('');
   const [customer, setCustomer] = useState(null);
   const [customerChecking, setCustomerChecking] = useState(isAccountPath);
-  const [customerMode, setCustomerMode] = useState('login');
+  const [customerMode, setCustomerMode] = useState(
+    () => new URLSearchParams(window.location.search).has('recover') ? 'recovery' : 'login',
+  );
   const [customerCredentials, setCustomerCredentials] = useState({ email: '', password: '' });
   const [customerError, setCustomerError] = useState('');
   const [customerNotice, setCustomerNotice] = useState('');
@@ -1661,33 +1783,38 @@ function App() {
           <p className="eyebrow">SSTE Studio · staff access</p>
           <h1 id="employee-access-title">Employee sign in</h1>
           <p className="admin-login-copy">Use the work email and password provided by the store owner.</p>
-          <form className="admin-login-form" onSubmit={handleEmployeeLogin}>
-            <label>
-              Work email
-              <input
-                type="email"
-                autoComplete="username"
-                required
-                value={employeeCredentials.email}
-                onChange={(event) => setEmployeeCredentials((previous) => ({ ...previous, email: event.target.value }))}
-              />
-            </label>
-            <label>
-              Password
-              <input
-                type="password"
-                autoComplete="current-password"
-                required
-                value={employeeCredentials.password}
-                onChange={(event) => setEmployeeCredentials((previous) => ({ ...previous, password: event.target.value }))}
-              />
-            </label>
-            {employeeError && <p className="admin-login-error" role="alert">{employeeError}</p>}
-            <div className="admin-login-actions">
-              <a className="secondary-button" href="/">Back to store</a>
-              <button className="primary-button" type="submit">Sign in</button>
-            </div>
-          </form>
+          {employeeRecovering ? (
+            <AccountRecoveryPanel initialAccountType="employee" onBack={() => setEmployeeRecovering(false)} />
+          ) : (
+            <form className="admin-login-form" onSubmit={handleEmployeeLogin}>
+              <label>
+                Work email
+                <input
+                  type="email"
+                  autoComplete="username"
+                  required
+                  value={employeeCredentials.email}
+                  onChange={(event) => setEmployeeCredentials((previous) => ({ ...previous, email: event.target.value }))}
+                />
+              </label>
+              <label>
+                Password
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  value={employeeCredentials.password}
+                  onChange={(event) => setEmployeeCredentials((previous) => ({ ...previous, password: event.target.value }))}
+                />
+              </label>
+              {employeeError && <p className="admin-login-error" role="alert">{employeeError}</p>}
+              <div className="admin-login-actions">
+                <a className="secondary-button" href="/">Back to store</a>
+                <button className="primary-button" type="submit">Sign in</button>
+              </div>
+              <button className="text-button account-forgot-link" type="button" onClick={() => setEmployeeRecovering(true)}>Forgot email or password?</button>
+            </form>
+          )}
         </section>
       </main>
     );
@@ -3673,12 +3800,17 @@ function App() {
               <p className="eyebrow">Authorized delivery staff only</p>
               <h1>Delivery sign in</h1>
               <p className="admin-login-copy">Use the separate account provided by the store owner. You can access only deliveries assigned to you.</p>
-              <form className="admin-login-form" onSubmit={handleDeliveryLogin}>
-                <label>Email<input type="email" required autoComplete="username" value={deliveryCredentials.email} onChange={(event) => setDeliveryCredentials((previous) => ({ ...previous, email: event.target.value }))} /></label>
-                <label>Password<input type="password" required autoComplete="current-password" value={deliveryCredentials.password} onChange={(event) => setDeliveryCredentials((previous) => ({ ...previous, password: event.target.value }))} /></label>
-                {deliveryError && <p className="admin-login-error" role="alert">{deliveryError}</p>}
-                <div className="admin-login-actions"><a className="secondary-button" href="/">Cancel</a><button className="primary-button" type="submit">Sign in</button></div>
-              </form>
+              {deliveryRecovering ? (
+                <AccountRecoveryPanel initialAccountType="delivery" onBack={() => setDeliveryRecovering(false)} />
+              ) : (
+                <form className="admin-login-form" onSubmit={handleDeliveryLogin}>
+                  <label>Email<input type="email" required autoComplete="username" value={deliveryCredentials.email} onChange={(event) => setDeliveryCredentials((previous) => ({ ...previous, email: event.target.value }))} /></label>
+                  <label>Password<input type="password" required autoComplete="current-password" value={deliveryCredentials.password} onChange={(event) => setDeliveryCredentials((previous) => ({ ...previous, password: event.target.value }))} /></label>
+                  {deliveryError && <p className="admin-login-error" role="alert">{deliveryError}</p>}
+                  <div className="admin-login-actions"><a className="secondary-button" href="/">Cancel</a><button className="primary-button" type="submit">Sign in</button></div>
+                  <button className="text-button account-forgot-link" type="button" onClick={() => setDeliveryRecovering(true)}>Forgot email or password?</button>
+                </form>
+              )}
             </section>
           )}
         </main>
@@ -4003,55 +4135,66 @@ function App() {
               </div>
 
               <div className="account-auth-panel">
-                <div className="account-mode-switch" role="group" aria-label="Account access mode">
-                  <button
-                    type="button"
-                    className={customerMode === 'login' ? 'active' : ''}
-                    onClick={() => { setCustomerMode('login'); setCustomerError(''); }}
-                  >
-                    Sign in
-                  </button>
-                  <button
-                    type="button"
-                    className={customerMode === 'register' ? 'active' : ''}
-                    onClick={() => { setCustomerMode('register'); setCustomerError(''); }}
-                  >
-                    Create account
-                  </button>
-                </div>
+                {customerMode === 'recovery' ? (
+                  <AccountRecoveryPanel
+                    initialAccountType={new URLSearchParams(window.location.search).get('recover') || 'customer'}
+                    allowAccountTypeSelection
+                    onBack={() => { setCustomerMode('login'); setCustomerError(''); }}
+                  />
+                ) : (
+                  <>
+                    <div className="account-mode-switch" role="group" aria-label="Account access mode">
+                      <button
+                        type="button"
+                        className={customerMode === 'login' ? 'active' : ''}
+                        onClick={() => { setCustomerMode('login'); setCustomerError(''); }}
+                      >
+                        Sign in
+                      </button>
+                      <button
+                        type="button"
+                        className={customerMode === 'register' ? 'active' : ''}
+                        onClick={() => { setCustomerMode('register'); setCustomerError(''); }}
+                      >
+                        Create account
+                      </button>
+                    </div>
 
-                <form className="account-form" onSubmit={handleCustomerAuth}>
-                  <label>
-                    Email
-                    <input
-                      type="email"
-                      autoComplete="email"
-                      required
-                      maxLength="254"
-                      value={customerCredentials.email}
-                      onChange={(event) => setCustomerCredentials((previous) => ({ ...previous, email: event.target.value }))}
-                      placeholder="you@example.com"
-                    />
-                  </label>
-                  <label>
-                    Password
-                    <input
-                      type="password"
-                      autoComplete={customerMode === 'register' ? 'new-password' : 'current-password'}
-                      required
-                      minLength="12"
-                      maxLength="256"
-                      value={customerCredentials.password}
-                      onChange={(event) => setCustomerCredentials((previous) => ({ ...previous, password: event.target.value }))}
-                      placeholder="At least 12 characters"
-                    />
-                  </label>
-                  {customerError && <p className="account-error" role="alert">{customerError}</p>}
-                  {customerNotice && <p className="account-notice" role="status">{customerNotice}</p>}
-                  <button className="primary-button" type="submit">
-                    {customerMode === 'register' ? 'Create account' : 'Sign in'}
-                  </button>
-                </form>
+                    <form className="account-form" onSubmit={handleCustomerAuth}>
+                      <label>
+                        Email
+                        <input
+                          type="email"
+                          autoComplete="email"
+                          required
+                          maxLength="254"
+                          value={customerCredentials.email}
+                          onChange={(event) => setCustomerCredentials((previous) => ({ ...previous, email: event.target.value }))}
+                          placeholder="you@example.com"
+                        />
+                      </label>
+                      <label>
+                        Password
+                        <input
+                          type="password"
+                          autoComplete={customerMode === 'register' ? 'new-password' : 'current-password'}
+                          required
+                          minLength="12"
+                          maxLength="256"
+                          value={customerCredentials.password}
+                          onChange={(event) => setCustomerCredentials((previous) => ({ ...previous, password: event.target.value }))}
+                          placeholder="At least 12 characters"
+                        />
+                      </label>
+                      {customerError && <p className="account-error" role="alert">{customerError}</p>}
+                      {customerNotice && <p className="account-notice" role="status">{customerNotice}</p>}
+                      <button className="primary-button" type="submit">
+                        {customerMode === 'register' ? 'Create account' : 'Sign in'}
+                      </button>
+                      {customerMode === 'login' && <button className="text-button account-forgot-link" type="button" onClick={() => setCustomerMode('recovery')}>Forgot email or password?</button>}
+                    </form>
+                  </>
+                )}
               </div>
             </section>
           )}

@@ -1,0 +1,39 @@
+name: Automated QA and maintenance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  models: read
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build
+        run: npm run build 2>&1 | tee build.log; exit ${PIPESTATUS[0]}
+      - name: Unit tests
+        run: npm run test:unit 2>&1 | tee unit.log; exit ${PIPESTATUS[0]}
+      - name: Dependency audit
+        run: npm audit --omit=dev --audit-level=high 2>&1 | tee audit.log; exit ${PIPESTATUS[0]}
+        continue-on-error: true
+      - name: LLM triage (issue only, never changes code)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node scripts/triage-failure.mjs

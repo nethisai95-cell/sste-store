@@ -1032,7 +1032,6 @@ function App() {
 
   useEffect(() => {
     if (typeof EventSource === 'undefined') return undefined;
-    let timer = null;
     let running = false;
     let queued = false;
     const run = async () => {
@@ -1041,10 +1040,7 @@ function App() {
       try { await liveRefreshRef.current?.(); } finally { running = false; }
       if (queued) { queued = false; run(); }
     };
-    const refresh = () => {
-      clearTimeout(timer);
-      timer = setTimeout(run, 60);
-    };
+    const refresh = () => { run(); };
     const source = new EventSource('/api/events');
     source.addEventListener('change', refresh);
     source.addEventListener('hello', refresh);
@@ -1054,7 +1050,6 @@ function App() {
       if (document.visibilityState === 'visible') refresh();
     }, 8000);
     return () => {
-      clearTimeout(timer);
       clearInterval(poll);
       source.close();
       document.removeEventListener('visibilitychange', onVisible);

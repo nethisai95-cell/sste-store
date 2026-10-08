@@ -5,11 +5,11 @@ import basicSsl from '@vitejs/plugin-basic-ssl';
 export default defineConfig({
   plugins: [react(), ...(process.env.DEV_HTTPS === '1' ? [basicSsl()] : [])],
   server: {
-    host: '0.0.0.0',
+    host: '::',
     port: 5173,
     allowedHosts: ['.trycloudflare.com'],
     proxy: {
-      '/api': process.env.API_TARGET || 'http://localhost:3000',
+      '/api': process.env.API_TARGET || 'http://127.0.0.1:3000',
     },
   },
   preview: {

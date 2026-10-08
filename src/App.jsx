@@ -205,6 +205,21 @@ function OrderInvoice({ order }) {
   );
 }
 
+const LABEL_PAGE_CSS = '@page { size: 50mm 30mm; margin: 0; }';
+const LABEL_SHEET_PAGE_CSS = '@page { size: A4; margin: 8mm; }';
+
+function printWithPage(pageCss) {
+  const style = document.createElement('style');
+  style.textContent = pageCss;
+  document.head.appendChild(style);
+  const cleanup = () => {
+    style.remove();
+    window.removeEventListener('afterprint', cleanup);
+  };
+  window.addEventListener('afterprint', cleanup);
+  window.print();
+}
+
 function AdminQrLabel({
   url,
   title,
@@ -233,9 +248,9 @@ function AdminQrLabel({
         <strong>{title}</strong>
         <span>{identifier}</span>
         <small>{description}</small>
-        <button className="secondary-button admin-qr-print-button" type="button" disabled={!imageUrl} onClick={() => window.print()}>
-          Print QR label
-        </button>
+        <button className="secondary-button admin-qr-print-button" type="button"         disabled={!imageUrl} onClick={() => printWithPage(LABEL_PAGE_CSS)}>
+                  Print QR label
+                </button>
       </div>
     </div>
   );
@@ -3132,9 +3147,9 @@ function App() {
                               {labelSheetProductId === product.id ? 'Hide label sheet' : `Label sheet (${inventoryUnitsByProduct[product.id].units.length})`}
                             </button>
                             {labelSheetProductId === product.id && (
-                              <button type="button" className="primary-button" onClick={() => window.print()}>
-                                Print all labels
-                              </button>
+                              <button type="button"                               className="primary-button" onClick={() => printWithPage(LABEL_SHEET_PAGE_CSS)}>
+                                                              Print all labels
+                                                            </button>
                             )}
                           </div>
                         )}

@@ -3016,6 +3016,11 @@ button:hover {
     display: none !important;
   }
 
+  body > .qr-print-layer,
+  body > .qr-print-layer * {
+    visibility: visible !important;
+  }
+
   body > .qr-print-layer {
     display: block;
     color: #000;

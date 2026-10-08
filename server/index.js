@@ -13,6 +13,7 @@ import { offlineAnalysis } from './offline-analyst.js';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import connectPgSimple from 'connect-pg-simple';
+import compression from 'compression';
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import session from 'express-session';
@@ -90,6 +91,9 @@ if (process.env.SESSION_SECRET.length < 32 || !/^[a-f0-9]{128}$/i.test(passwordD
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
+  max: Number(process.env.DATABASE_POOL_MAX) || 20,
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 10_000,
   ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false' } : undefined,
 });
 const PgSession = connectPgSimple(session);
@@ -110,6 +114,9 @@ app.use(helmet({
       frameAncestors: ["'none'"],
     },
   },
+}));
+app.use(compression({
+  filter: (request, response) => !String(response.getHeader('Content-Type') || '').includes('text/event-stream') && compression.filter(request, response),
 }));
 app.use(express.json({
   limit: '20kb',
@@ -133,15 +140,49 @@ app.use(session({
 }));
 
 const liveClients = new Set();
+const instanceId = randomUUID();
 let liveVersion = 0;
 let liveTimer = null;
+let listenerReady = false;
+let productsCache = null;
 
-function broadcastChange() {
+function fanOutChange() {
   liveVersion += 1;
+  productsCache = null;
   clearTimeout(liveTimer);
   liveTimer = setTimeout(() => {
-    for (const client of liveClients) client.write(`event: change\ndata: ${liveVersion}\n\n`);
+    const message = `event: change\ndata: ${liveVersion}\n\n`;
+    for (const client of liveClients) client.write(message);
   }, 40);
+}
+
+function broadcastChange() {
+  if (!listenerReady) {
+    fanOutChange();
+    return;
+  }
+  pool.query('SELECT pg_notify($1, $2)', ['sste_change', instanceId]).catch(() => fanOutChange());
+}
+
+async function startChangeListener() {
+  try {
+    const client = new pg.Client({
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false' } : undefined,
+    });
+    client.on('notification', fanOutChange);
+    client.on('error', () => { listenerReady = false; });
+    client.on('end', () => {
+      listenerReady = false;
+      setTimeout(startChangeListener, 3000).unref();
+    });
+    await client.connect();
+    await client.query('LISTEN sste_change');
+    listenerReady = true;
+  } catch {
+    listenerReady = false;
+    setTimeout(startChangeListener, 5000).unref();
+  }
 }
 
 app.use('/api', (request, response, next) => {
@@ -919,17 +960,23 @@ app.get('/api/health', async (_request, response) => {
   }
 });
 
-app.get('/api/products', async (_request, response, next) => {
+app.get('/api/products', async (request, response, next) => {
   try {
-    const { rows } = await pool.query(
-      `SELECT ${productFields} FROM products WHERE published = TRUE ORDER BY sort_order ASC, created_at DESC`,
-    );
-    response.json(rows.map((product) => ({
-      ...product,
-      price: Number(product.price),
-      rating: Number(product.rating),
-      gstRate: product.gstRate === null ? null : Number(product.gstRate),
-    })));
+    if (!productsCache || Date.now() - productsCache.at > 5000) {
+      const load = pool.query(
+        `SELECT ${productFields} FROM products WHERE published = TRUE ORDER BY sort_order ASC, created_at DESC`,
+      ).then(({ rows }) => JSON.stringify(rows.map((product) => ({
+        ...product,
+        price: Number(product.price),
+        rating: Number(product.rating),
+        gstRate: product.gstRate === null ? null : Number(product.gstRate),
+      }))));
+      productsCache = { at: Date.now(), body: load };
+      load.catch(() => { if (productsCache?.body === load) productsCache = null; });
+    }
+    const body = await productsCache.body;
+    response.set('Cache-Control', 'public, max-age=0, must-revalidate');
+    response.type('json').send(body);
   } catch (error) {
     next(error);
   }
@@ -4174,7 +4221,13 @@ app.post('/api/pos/sales/:id/void', requirePosStaff, async (request, response, n
 app.use('/api', (_request, response) => response.status(404).json({ error: 'API route not found.' }));
 
 const distDirectory = path.join(projectRoot, 'dist');
-app.use(express.static(distDirectory));
+app.use(express.static(distDirectory, {
+  setHeaders(response, filePath) {
+    response.setHeader('Cache-Control', filePath.includes(`${path.sep}assets${path.sep}`)
+      ? 'public, max-age=31536000, immutable'
+      : 'no-cache');
+  },
+}));
 app.use((request, response, next) => {
   if (request.method !== 'GET' || request.path.startsWith('/api/')) return next();
   response.sendFile(path.join(distDirectory, 'index.html'), (error) => error && next());
@@ -4214,11 +4267,12 @@ async function start() {
     throw new Error(`Serialized inventory does not reconcile for tracked products: ${inventoryIssues.map((item) => item.name).join(', ')}. Reconcile inventory units before starting the API.`);
   }
   await pool.query('SELECT 1');
+  await startChangeListener();
   await pool.query(
     `UPDATE crm_contact_sync SET status = 'pending', next_attempt_at = NOW(), updated_at = NOW()
      WHERE status = 'processing'`,
   );
-  app.listen(port, () => {
+  const httpServer = app.listen(port, () => {
     console.log(`SSTE API listening on port ${port}`);
     const syncTimer = setInterval(() => {
       processZohoSyncQueue().catch((error) => console.error('Zoho CRM background sync failed:', error.message));
@@ -4226,6 +4280,14 @@ async function start() {
     syncTimer.unref();
     processZohoSyncQueue().catch((error) => console.error('Zoho CRM background sync failed:', error.message));
   });
+  httpServer.keepAliveTimeout = 65_000;
+  httpServer.headersTimeout = 66_000;
+  const shutdown = () => {
+    httpServer.close(() => pool.end().finally(() => process.exit(0)));
+    setTimeout(() => process.exit(0), 10_000).unref();
+  };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 }
 
 start().catch((error) => {

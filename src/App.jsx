@@ -229,7 +229,18 @@ function usePrintJob(pageCss) {
   const [printing, setPrinting] = useState(false);
   useEffect(() => {
     if (!printing) return undefined;
-    const timer = window.setTimeout(() => printWithPage(pageCss), 50);
+    const startedAt = Date.now();
+    const waitForImages = () => {
+      const images = [...document.querySelectorAll('.qr-print-layer img')];
+      const pending = document.querySelectorAll('.qr-print-layer .qr-sheet-label > span:first-child, .qr-print-layer .qr-print-single > span:first-child').length;
+      const ready = images.length > 0 && !pending && images.every((image) => image.complete && image.naturalWidth > 0);
+      if (ready || Date.now() - startedAt > 4000) {
+        printWithPage(pageCss);
+      } else {
+        timer = window.setTimeout(waitForImages, 60);
+      }
+    };
+    let timer = window.setTimeout(waitForImages, 50);
     const done = () => setPrinting(false);
     window.addEventListener('afterprint', done);
     return () => {
@@ -933,6 +944,23 @@ function App() {
     }
   }
 
+  async function loadAdminLiveData() {
+    const apply = (path, handler) => apiRequest(path).then(handler).catch(() => {});
+    await Promise.all([
+      apply('/api/admin/orders', setAdminOrders),
+      apply('/api/admin/deliveries', (data) => {
+        setAdminDeliveries(data.deliveries);
+        setPickupAddress(data.pickupAddress || '');
+      }),
+      apply('/api/admin/products', setProducts),
+      apply('/api/admin/support/tickets', setAdminSupportTickets),
+      apply('/api/admin/inventory/movements?limit=12', setInventoryMovements),
+      apply('/api/admin/ai/status', setAdminAiStatus),
+      apply('/api/admin/delivery/agents', setDeliveryAgents),
+      apply('/api/admin/feedback', setAdminFeedback),
+    ]);
+  }
+
   async function loadEmployeeWorkspace(employeeInfo) {
     const workspace = await apiRequest('/api/employee/workspace');
     setEmployee(employeeInfo);
@@ -968,10 +996,17 @@ function App() {
   }
 
   const liveRefreshRef = useRef(null);
+  const lastFullAdminLoad = useRef(Date.now());
   liveRefreshRef.current = async () => {
     try {
       if (isAdminPath) {
-        if (adminMode) await loadAdminDashboardData(adminAnalyticsRange, true);
+        if (adminMode) {
+          await loadAdminLiveData();
+          if (Date.now() - lastFullAdminLoad.current > 15000) {
+            lastFullAdminLoad.current = Date.now();
+            await loadAdminDashboardData(adminAnalyticsRange, true);
+          }
+        }
       } else if (isDeliveryPath) {
         if (deliveryAgent) await loadDeliveryAssignments();
       } else if (isEmployeePath) {

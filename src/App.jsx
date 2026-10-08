@@ -878,8 +878,8 @@ function App() {
     setPickupAddress(result.pickupAddress || '');
   }
 
-  async function loadAdminDashboardData(range = adminAnalyticsRange) {
-    setAdminAnalyticsLoading(true);
+  async function loadAdminDashboardData(range = adminAnalyticsRange, silent = false) {
+    if (!silent) setAdminAnalyticsLoading(true);
     try {
       const [
         adminProducts,
@@ -929,7 +929,7 @@ function App() {
       setPickupAddress(deliveryData.pickupAddress || '');
       setAdminAnalyticsRange(range);
     } finally {
-      setAdminAnalyticsLoading(false);
+      if (!silent) setAdminAnalyticsLoading(false);
     }
   }
 
@@ -966,6 +966,54 @@ function App() {
       setAdminAnalyticsLoading(false);
     }
   }
+
+  const liveRefreshRef = useRef(null);
+  liveRefreshRef.current = async () => {
+    try {
+      if (isAdminPath) {
+        if (adminMode) await loadAdminDashboardData(adminAnalyticsRange, true);
+      } else if (isDeliveryPath) {
+        if (deliveryAgent) await loadDeliveryAssignments();
+      } else if (isEmployeePath) {
+        if (employee) await loadEmployeeWorkspace(employee);
+      } else if (isAccountPath) {
+        if (customer) {
+          const [orders, tickets, feedback] = await Promise.all([
+            apiRequest('/api/account/orders'),
+            apiRequest('/api/support/tickets'),
+            apiRequest('/api/account/feedback'),
+          ]);
+          setCustomerOrders(orders);
+          setSupportTickets(tickets);
+          setAccountFeedback(feedback);
+        }
+      } else {
+        setProducts(await apiRequest('/api/products'));
+      }
+    } catch {
+      // A failed background refresh keeps the data already on screen.
+    }
+  };
+
+  useEffect(() => {
+    if (typeof EventSource === 'undefined') return undefined;
+    let timer = null;
+    const refresh = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => liveRefreshRef.current?.(), 250);
+    };
+    const source = new EventSource('/api/events');
+    source.addEventListener('change', refresh);
+    const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
+    document.addEventListener('visibilitychange', onVisible);
+    const poll = setInterval(refresh, 30000);
+    return () => {
+      clearTimeout(timer);
+      clearInterval(poll);
+      source.close();
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
 
   const aiAnalystOn = Boolean(adminAiStatus?.configured) && (adminAiStatus?.agents?.find((agent) => agent.key === 'bi_analyst')?.effectiveEnabled ?? true);
 

@@ -132,6 +132,44 @@ app.use(session({
   },
 }));
 
+const liveClients = new Set();
+let liveVersion = 0;
+let liveTimer = null;
+
+function broadcastChange() {
+  liveVersion += 1;
+  clearTimeout(liveTimer);
+  liveTimer = setTimeout(() => {
+    for (const client of liveClients) client.write(`event: change\ndata: ${liveVersion}\n\n`);
+  }, 150);
+}
+
+app.use('/api', (request, response, next) => {
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
+    response.on('finish', () => {
+      if (response.statusCode < 400) broadcastChange();
+    });
+  }
+  next();
+});
+
+app.get('/api/events', (request, response) => {
+  response.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  response.flushHeaders();
+  response.write(`retry: 3000\nevent: hello\ndata: ${liveVersion}\n\n`);
+  liveClients.add(response);
+  const heartbeat = setInterval(() => response.write(': ping\n\n'), 25000);
+  request.on('close', () => {
+    clearInterval(heartbeat);
+    liveClients.delete(response);
+  });
+});
+
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 8,

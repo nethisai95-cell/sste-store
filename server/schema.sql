@@ -472,3 +472,8 @@ CREATE INDEX IF NOT EXISTS inventory_units_pos_sale_idx
   ON inventory_units (pos_sale_id) WHERE pos_sale_id IS NOT NULL;
 ALTER TABLE pos_sales ADD COLUMN IF NOT EXISTS seller_registered_address TEXT NOT NULL DEFAULT '';
 ALTER TABLE pos_sales ADD COLUMN IF NOT EXISTS seller_registered_state VARCHAR(80) NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS ai_agent_settings (
+  agent_key VARCHAR(40) PRIMARY KEY,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

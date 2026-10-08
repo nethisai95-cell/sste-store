@@ -4606,3 +4606,6 @@ button:hover {
 .qr-print-layer {
   display: none;
 }
+
+.admin-ai-agents{display:grid;gap:.5rem;margin:.75rem 0}.admin-ai-agent-toggle{display:flex;gap:.75rem;align-items:flex-start;padding:.75rem 1rem;border:1px solid rgba(0,0,0,.12);border-radius:12px;cursor:pointer}.admin-ai-agent-toggle small{display:block;color:#6b6b6b}
+.admin-ai-agent-toggle.is-off{opacity:.55}

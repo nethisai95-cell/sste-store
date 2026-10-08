@@ -3307,8 +3307,55 @@ async function getAiBusinessSnapshot(rangeDays) {
   return rows[0].snapshot;
 }
 
-app.get('/api/admin/ai/status', requireAdmin, (_request, response) => {
+const aiAgents = {
+  chief_of_staff: { label: 'Chief of Staff', parent: null, status: 'planned', description: 'Coordinates department heads and summarises their reports for the owner.' },
+  analytics_head: { label: 'Head of Analytics', parent: 'chief_of_staff', status: 'planned', description: 'Owns reporting and business insight agents.' },
+  bi_analyst: { label: 'Gemini BI analyst', parent: 'analytics_head', status: 'live', description: 'Answers questions about aggregate sales, stock and support metrics.' },
+  inventory_head: { label: 'Head of Inventory', parent: 'chief_of_staff', status: 'planned', description: 'Owns stock and purchasing agents.' },
+  restock_advisor: { label: 'Restock advisor', parent: 'inventory_head', status: 'planned', description: 'Suggests reorder quantities from stock levels and sales pace.' },
+  support_head: { label: 'Head of Support', parent: 'chief_of_staff', status: 'planned', description: 'Owns customer service agents.' },
+  reply_drafter: { label: 'Reply drafter', parent: 'support_head', status: 'planned', description: 'Drafts customer replies for a human to approve.' },
+  finance_head: { label: 'Head of Finance', parent: 'chief_of_staff', status: 'planned', description: 'Owns billing and compliance agents.' },
+  invoice_auditor: { label: 'Invoice auditor', parent: 'finance_head', status: 'planned', description: 'Flags invoices with GST or total mismatches.' },
+  engineering_head: { label: 'Head of Engineering', parent: 'chief_of_staff', status: 'planned', description: 'Owns quality and maintenance agents.' },
+  qa_maintainer: { label: 'QA maintainer', parent: 'engineering_head', status: 'live', description: 'Runs in GitHub Actions: tests the app and opens AI-triaged issues. Controlled from the repository, not here.' },
+};
+
+async function getAiAgentStates() {
+  const { rows } = await pool.query('SELECT agent_key, enabled FROM ai_agent_settings');
+  const stored = new Map(rows.map((row) => [row.agent_key, row.enabled]));
+  const own = (key) => stored.get(key) ?? true;
+  const effective = (key) => own(key) && (aiAgents[key].parent ? effective(aiAgents[key].parent) : true);
+  return Object.entries(aiAgents).map(([key, agent]) => ({
+    key, ...agent, enabled: own(key), effectiveEnabled: effective(key),
+  }));
+}
+
+app.put('/api/admin/ai/agents/:key', requireAdmin, async (request, response, next) => {
+  try {
+    if (!Object.hasOwn(aiAgents, request.params.key) || typeof request.body?.enabled !== 'boolean') {
+      return response.status(400).json({ error: 'Choose a known AI agent and send enabled as true or false.' });
+    }
+    await pool.query(
+      `INSERT INTO ai_agent_settings (agent_key, enabled) VALUES ($1, $2)
+       ON CONFLICT (agent_key) DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = NOW()`,
+      [request.params.key, request.body.enabled],
+    );
+    response.json({ agents: await getAiAgentStates() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/admin/ai/status', requireAdmin, async (_request, response, next) => {
+  let agents;
+  try {
+    agents = await getAiAgentStates();
+  } catch (error) {
+    return next(error);
+  }
   response.json({
+    agents,
     provider: 'Google Gemini',
     model: geminiModel,
     configured: Boolean(geminiApiKey),
@@ -3319,6 +3366,14 @@ app.get('/api/admin/ai/status', requireAdmin, (_request, response) => {
 app.post('/api/admin/ai/ask', requireAdmin, aiAnalysisLimiter, async (request, response, next) => {
   if (!geminiApiKey) {
     return response.status(503).json({ error: 'Gemini is not configured. Add GEMINI_API_KEY to the server environment and restart the API.' });
+  }
+  try {
+    const agents = await getAiAgentStates();
+    if (!agents.find((agent) => agent.key === 'bi_analyst')?.effectiveEnabled) {
+      return response.status(403).json({ error: 'The AI analyst is switched off. Turn it on in the AI agents panel.' });
+    }
+  } catch (error) {
+    return next(error);
   }
   const question = typeof request.body?.question === 'string' ? request.body.question.trim() : '';
   const rangeDays = Number(request.body?.rangeDays || 30);

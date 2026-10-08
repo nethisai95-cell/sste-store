@@ -965,6 +965,21 @@ function App() {
     }
   }
 
+  const aiAnalystOn = Boolean(adminAiStatus?.configured) && (adminAiStatus?.agents?.find((agent) => agent.key === 'bi_analyst')?.effectiveEnabled ?? true);
+
+  const toggleAiAgent = async (key, enabled) => {
+    setAdminAiError('');
+    try {
+      const result = await apiRequest(`/api/admin/ai/agents/${key}`, {
+        method: 'PUT',
+        body: JSON.stringify({ enabled }),
+      });
+      setAdminAiStatus((current) => ({ ...current, agents: result.agents }));
+    } catch (error) {
+      setAdminAiError(error.message);
+    }
+  };
+
   const askAdminAi = async (event) => {
     event.preventDefault();
     setAdminAiLoading(true);
@@ -2621,9 +2636,38 @@ function App() {
                       <h2 id="admin-ai-title">Gemini BI developer</h2>
                       <p>Ask questions about the selected report. Gemini can explain KPIs and suggest next steps; it cannot change store data.</p>
                     </div>
-                    <span className={`admin-data-badge ${adminAiStatus?.configured ? '' : 'attention'}`}>
-                      {adminAiStatus?.configured ? 'Gemini connected' : 'Setup required'}
+                    <span className={`admin-data-badge ${aiAnalystOn ? '' : 'attention'}`}>
+                      {!adminAiStatus?.configured ? 'Setup required' : aiAnalystOn ? 'Gemini connected' : 'Switched off'}
                     </span>
+                  </div>
+                  <div className="admin-ai-agents" aria-label="AI agent organisation chart">
+                    {(adminAiStatus?.agents || []).map((agent, _index, all) => {
+                      let depth = 0;
+                      for (let p = agent.parent; p; p = all.find((a) => a.key === p)?.parent) depth += 1;
+                      const external = agent.key === 'qa_maintainer';
+                      return (
+                        <label
+                          key={agent.key}
+                          className={`admin-ai-agent-toggle ${agent.effectiveEnabled ? '' : 'is-off'}`}
+                          style={{ marginLeft: `${depth * 1.5}rem` }}
+                        >
+                          <input
+                            type="checkbox"
+                            role="switch"
+                            checked={agent.enabled}
+                            disabled={external}
+                            onChange={(event) => toggleAiAgent(agent.key, event.target.checked)}
+                          />
+                          <span>
+                            <strong>
+                              {agent.label}: {agent.enabled ? (agent.effectiveEnabled ? 'On' : 'On (paused by manager)') : 'Off'}
+                              {' · '}{agent.status === 'live' ? 'Live' : 'Planned'}
+                            </strong>
+                            <small>{agent.description}</small>
+                          </span>
+                        </label>
+                      );
+                    })}
                   </div>
                   <p className="admin-ai-privacy-note">
                     Your question and aggregate report metrics are sent to Google Gemini. Customer names, emails, phone numbers, addresses, individual orders, and support messages are not included. Do not put personal details in your question.
@@ -2642,7 +2686,7 @@ function App() {
                       <button
                         type="button"
                         key={suggestion}
-                        disabled={!adminAiStatus?.configured || adminAiLoading}
+                        disabled={!aiAnalystOn || adminAiLoading}
                         onClick={() => setAdminAiQuestion(suggestion)}
                       >
                         {suggestion}
@@ -2657,14 +2701,14 @@ function App() {
                       minLength="3"
                       maxLength="500"
                       rows="3"
-                      disabled={!adminAiStatus?.configured || adminAiLoading}
+                      disabled={!aiAnalystOn || adminAiLoading}
                       value={adminAiQuestion}
                       onChange={(event) => setAdminAiQuestion(event.target.value)}
                       placeholder="For example: What should I prioritize this week based on sales, stock, and support?"
                     />
                     <div className="admin-ai-submit-row">
                       <span>{adminAnalyticsRange}-day report · aggregate data only</span>
-                      <button className="primary-button" type="submit" disabled={!adminAiStatus?.configured || adminAiLoading}>
+                      <button className="primary-button" type="submit" disabled={!aiAnalystOn || adminAiLoading}>
                         {adminAiLoading ? 'Gemini is analysing…' : 'Ask Gemini'}
                       </button>
                     </div>

@@ -169,6 +169,7 @@ const aiAnalysisLimiter = rateLimit({
 const deliveryPinLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 6,
+  skipSuccessfulRequests: true,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   handler: (_request, response) => response.status(429).json({ error: 'Too many delivery PIN attempts. Contact dispatch before trying again.' }),

@@ -4164,6 +4164,7 @@ function App() {
                               onChange={(event) => setDeliveryPinDrafts((previous) => ({ ...previous, [delivery.deliveryId]: event.target.value.replace(/\D/g, '').slice(0, 6) }))}
                               placeholder="6-digit PIN from recipient"
                             />
+                            <small>Ask the customer for the PIN shown in their account under Orders. Confirm delivery works once all 6 digits are entered.</small>
                           </label>
                         )}
                         {delivery.deliveryStatus === 'out_for_delivery' && (
@@ -4183,11 +4184,15 @@ function App() {
                             <button
                               className="primary-button"
                               type="button"
-                              disabled={
-                                (delivery.deliveryStatus === 'assigned' && !allUnitsScanned) ||
-                                (nextStatus === 'delivered' && !/^\d{6}$/.test(deliveryPinDrafts[delivery.deliveryId] || ''))
-                              }
-                              onClick={() => updateDeliveryStep(delivery)}
+                              disabled={delivery.deliveryStatus === 'assigned' && !allUnitsScanned}
+                              onClick={() => {
+                                if (nextStatus === 'delivered' && !/^\d{6}$/.test(deliveryPinDrafts[delivery.deliveryId] || '')) {
+                                  setDeliveryNotice('');
+                                  setDeliveryError('Enter the 6-digit delivery PIN first. The customer finds it under Account → Orders → Delivery PIN.');
+                                  return;
+                                }
+                                updateDeliveryStep(delivery);
+                              }}
                             >
                               {nextStatus === 'delivered'
                                 ? 'Confirm delivery'

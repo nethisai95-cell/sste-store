@@ -14,7 +14,7 @@ function gstPaise(taxablePaise, rate) {
   return Math.round((taxablePaise * Math.round(Number(rate || 0) * 100)) / 10000);
 }
 
-function PosLogin({ apiRequest, onSignedIn }) {
+function PosLogin({ apiRequest, onSignedIn, notice }) {
   const [form, setForm] = useState({ email: '', password: '' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -56,6 +56,7 @@ function PosLogin({ apiRequest, onSignedIn }) {
           <input type="password" required autoComplete="current-password" value={form.password}
             onChange={(event) => setForm((previous) => ({ ...previous, password: event.target.value }))} />
         </label>
+        {notice && !error && <p className="admin-login-error" role="alert">{notice}</p>}
         {error && <p className="admin-login-error" role="alert">{error}</p>}
         <button className="primary-button" type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Open till'}</button>
         <a className="ghost-button" href="/">Back to storefront</a>
@@ -126,8 +127,20 @@ function Receipt({ sale, onClose }) {
   );
 }
 
-export default function PosApp({ apiRequest, QrScannerDialog }) {
+export default function PosApp({ apiRequest: rawApiRequest, QrScannerDialog }) {
   const [session, setSession] = useState(null);
+  const [sessionNotice, setSessionNotice] = useState('');
+  const apiRequest = useCallback(async (...args) => {
+    try {
+      return await rawApiRequest(...args);
+    } catch (requestError) {
+      if (/sign-in required|sign in/i.test(requestError.message || '')) {
+        setSession(null);
+        setSessionNotice('Your session ended. Please sign in again to continue.');
+      }
+      throw requestError;
+    }
+  }, [rawApiRequest]);
   const [checking, setChecking] = useState(true);
   const [products, setProducts] = useState([]);
   const [search, setSearch] = useState('');
@@ -302,7 +315,7 @@ export default function PosApp({ apiRequest, QrScannerDialog }) {
   };
 
   if (checking) return <main className="admin-shell"><p className="eyebrow">Opening till…</p></main>;
-  if (!session) return <PosLogin apiRequest={apiRequest} onSignedIn={setSession} />;
+  if (!session) return <PosLogin apiRequest={rawApiRequest} notice={sessionNotice} onSignedIn={(next) => { setSessionNotice(''); setSession(next); }} />;
 
   const canVoid = session.role === 'owner' || session.role === 'manager';
   const payDisabled = busy || cart.length === 0 || cashShort

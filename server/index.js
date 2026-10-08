@@ -26,6 +26,7 @@ import {
   validateStoreTaxProfile,
 } from './finance-validation.js';
 import { validateCustomerCredentials, validateOrderRequest } from './order-validation.js';
+import { parseUnitLookup, validatePosSale } from './pos-validation.js';
 import {
   recoveryProviderOptions,
   sendRecoveryEmail,
@@ -68,7 +69,7 @@ const validOrderStatuses = new Set(['received', 'processing', 'shipped', 'delive
 const validAnalyticsRanges = new Set([7, 30, 90, 365]);
 const validSupportCategories = new Set(['order', 'delivery', 'payment', 'product', 'return', 'other']);
 const validTicketStatuses = new Set(['open', 'in_progress', 'waiting_customer', 'resolved', 'closed']);
-const validEmployeeRoles = new Set(['manager', 'inventory', 'support', 'finance']);
+const validEmployeeRoles = new Set(['manager', 'inventory', 'support', 'finance', 'cashier']);
 const validRecoveryAccountTypes = new Set(['customer', 'employee', 'delivery']);
 const recoveryAccountTables = {
   customer: { table: 'customers', activeClause: '' },
@@ -196,9 +197,17 @@ function requireAdmin(request, response, next) {
   next();
 }
 
+const ownerStaffIdentity = () => ({ id: null, name: 'Owner', email: adminEmail, role: 'manager', isOwner: true });
+
 async function loadActiveEmployee(request) {
   const employeeId = request.session?.employeeId;
-  if (!employeeId) return null;
+  if (!employeeId) {
+    if (request.session?.adminEmail === adminEmail) {
+      request.employee = ownerStaffIdentity();
+      return request.employee;
+    }
+    return null;
+  }
   const { rows } = await pool.query(
     `SELECT id, name, email, role, auth_version AS "authVersion"
      FROM employees WHERE id = $1 AND active = TRUE`,
@@ -248,6 +257,10 @@ async function requireCustomer(request, response, next) {
 
 async function requireDeliveryAgent(request, response, next) {
   const agentId = request.session?.deliveryAgentId;
+  if (!agentId && request.session?.adminEmail === adminEmail) {
+    request.deliveryAgent = { id: null, name: 'Owner', email: adminEmail, isOwner: true };
+    return next();
+  }
   if (!agentId) return response.status(401).json({ error: 'Delivery staff sign-in required.' });
   try {
     const { rows } = await pool.query(
@@ -1789,6 +1802,7 @@ app.post('/api/employee/login', loginLimiter, async (request, response, next) =>
 
 app.post('/api/employee/logout', requireEmployee, async (request, response, next) => {
   try {
+    if (request.employee.isOwner) return response.sendStatus(204);
     await new Promise((resolve, reject) => {
       request.session.destroy((error) => error ? reject(error) : resolve());
     });
@@ -2123,6 +2137,27 @@ app.get('/api/admin/inventory/movements', requireAdminOrRoles('manager', 'invent
   }
 });
 
+app.post('/api/admin/orders/:id/invoice', requireAdminOrRoles('manager'), async (request, response, next) => {
+  if (!/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(request.params.id)) {
+    return response.status(400).json({ error: 'Invalid order id.' });
+  }
+  try {
+    // The number is assigned once from a sequence, so invoice numbers are unique and never reused.
+    const { rows } = await pool.query(
+      `UPDATE orders
+       SET invoice_number = COALESCE(invoice_number,
+         'INV/' || to_char(NOW() AT TIME ZONE 'Asia/Kolkata', 'YY') || '/' || nextval('invoice_number_seq'))
+       WHERE id = $1
+       RETURNING invoice_number AS "invoiceNumber"`,
+      [request.params.id],
+    );
+    if (!rows[0]) return response.status(404).json({ error: 'Order not found.' });
+    response.json(rows[0]);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get('/api/admin/orders', requireAdminOrRoles('manager'), async (_request, response, next) => {
   try {
     const { rows } = await pool.query(`
@@ -2132,6 +2167,7 @@ app.get('/api/admin/orders', requireAdminOrRoles('manager'), async (_request, re
         o.seller_legal_name AS "sellerLegalName", o.seller_gstin AS "sellerGstin",
         o.seller_registered_address AS "sellerRegisteredAddress",
         o.seller_registered_state AS "sellerRegisteredState",
+        o.invoice_number AS "invoiceNumber",
         o.payment_provider_mode AS "paymentProviderMode", o.created_at, o.updated_at,
         o.payment_status AS "paymentStatus", o.payment_method AS "paymentMethod",
         o.recipient_name AS "recipientName", o.phone,
@@ -2350,6 +2386,9 @@ app.put('/api/admin/orders/:id/delivery', requireAdminOrRoles('manager'), async 
 
 app.get('/api/delivery/session', async (request, response, next) => {
   const agentId = request.session?.deliveryAgentId;
+  if (!agentId && request.session?.adminEmail === adminEmail) {
+    return response.json({ authenticated: true, agent: { id: null, name: 'Owner', email: adminEmail } });
+  }
   if (!agentId) return response.json({ authenticated: false, agent: null });
   try {
     const { rows } = await pool.query(
@@ -2404,6 +2443,7 @@ app.post('/api/delivery/login', loginLimiter, async (request, response, next) =>
 
 app.post('/api/delivery/logout', requireDeliveryAgent, async (request, response, next) => {
   try {
+    if (request.deliveryAgent.isOwner) return response.sendStatus(204);
     await new Promise((resolve, reject) => {
       request.session.destroy((error) => error ? reject(error) : resolve());
     });
@@ -2449,7 +2489,7 @@ app.get('/api/delivery/assignments', requireDeliveryAgent, async (request, respo
           ) e
         ), '[]'::json) AS history
       FROM deliveries d JOIN orders o ON o.id = d.order_id
-      WHERE d.agent_id = $1 AND d.status NOT IN ('delivered', 'cancelled')
+      WHERE ($1::uuid IS NULL OR d.agent_id = $1) AND d.status NOT IN ('delivered', 'cancelled')
         AND o.status <> 'cancelled'
       ORDER BY CASE WHEN d.status = 'out_for_delivery' THEN 0 ELSE 1 END, d.updated_at DESC
       LIMIT 100
@@ -2472,10 +2512,12 @@ app.post('/api/delivery/units/:id/pickup', requireDeliveryAgent, async (request,
     await client.query('BEGIN');
     const { rows } = await client.query(
       `SELECT d.id AS delivery_id, d.status AS delivery_status,
+        d.agent_id AS assigned_agent_id,
         u.id AS unit_id, u.product_id, u.order_id, u.order_item_id
        FROM deliveries d
        JOIN inventory_units u ON u.order_id = d.order_id
-       WHERE d.agent_id = $1 AND u.id = $2 AND u.status = 'sold'
+       WHERE ($1::uuid IS NULL OR d.agent_id = $1) AND d.agent_id IS NOT NULL
+         AND u.id = $2 AND u.status = 'sold'
        FOR UPDATE OF d, u`,
       [request.deliveryAgent.id, request.params.id],
     );
@@ -2489,13 +2531,13 @@ app.post('/api/delivery/units/:id/pickup', requireDeliveryAgent, async (request,
        VALUES ($1, $2, $3)
        ON CONFLICT (delivery_id, unit_id) DO NOTHING
        RETURNING unit_id`,
-      [delivery.delivery_id, delivery.unit_id, request.deliveryAgent.id],
+      [delivery.delivery_id, delivery.unit_id, delivery.assigned_agent_id],
     );
     if (scanRows.length) {
       await client.query(
         `INSERT INTO delivery_events (id, delivery_id, actor_role, actor_id, event_type, unit_id, note)
-         VALUES ($1, $2, 'driver', $3, 'unit_picked_up', $4, 'Serialized item scanned and checked at pickup')`,
-        [randomUUID(), delivery.delivery_id, request.deliveryAgent.id, delivery.unit_id],
+         VALUES ($1, $2, $5, $3, 'unit_picked_up', $4, 'Serialized item scanned and checked at pickup')`,
+        [randomUUID(), delivery.delivery_id, request.deliveryAgent.id, delivery.unit_id, request.deliveryAgent.isOwner ? 'owner' : 'driver'],
       );
     }
     await client.query('COMMIT');
@@ -2531,7 +2573,7 @@ app.patch('/api/delivery/assignments/:id/status', requireDeliveryAgent, limitDel
     const { rows } = await client.query(
       `SELECT d.id, d.order_id, d.status, d.pin_seed, o.status AS order_status
        FROM deliveries d JOIN orders o ON o.id = d.order_id
-       WHERE d.id = $1 AND d.agent_id = $2
+       WHERE d.id = $1 AND ($2::uuid IS NULL OR d.agent_id = $2)
        FOR UPDATE OF d, o`,
       [request.params.id, request.deliveryAgent.id],
     );
@@ -2576,8 +2618,8 @@ app.patch('/api/delivery/assignments/:id/status', requireDeliveryAgent, limitDel
     );
     await client.query(
       `INSERT INTO delivery_events (id, delivery_id, actor_role, actor_id, event_type, note)
-       VALUES ($1, $2, 'driver', $3, $4, $5)`,
-      [randomUUID(), delivery.id, request.deliveryAgent.id, status, note],
+       VALUES ($1, $2, $6, $3, $4, $5)`,
+      [randomUUID(), delivery.id, request.deliveryAgent.id, status, note, request.deliveryAgent.isOwner ? 'owner' : 'driver'],
     );
     if (status === 'out_for_delivery') {
       await client.query(
@@ -3701,6 +3743,328 @@ app.delete('/api/admin/products/:id', requireAdmin, async (request, response, ne
     response.sendStatus(204);
   } catch (error) {
     next(error);
+  }
+});
+
+function formatPosSale(sale, items = []) {
+  return {
+    id: sale.id,
+    receiptNumber: sale.receipt_number,
+    status: sale.status,
+    paymentMethod: sale.payment_method,
+    paymentReference: sale.payment_reference,
+    customerName: sale.customer_name,
+    customerPhone: sale.customer_phone,
+    taxableSubtotal: Number(sale.taxable_subtotal),
+    taxTotal: Number(sale.tax_total),
+    total: Number(sale.total),
+    amountTendered: sale.amount_tendered === null ? null : Number(sale.amount_tendered),
+    changeDue: sale.change_due === null ? null : Number(sale.change_due),
+    sellerLegalName: sale.seller_legal_name,
+    sellerGstin: sale.seller_gstin,
+    sellerAddress: sale.seller_registered_address || '',
+    sellerState: sale.seller_registered_state || '',
+    cashierName: sale.cashier_name,
+    voidReason: sale.void_reason,
+    voidedAt: sale.voided_at,
+    createdAt: sale.created_at,
+    items: items.map((item) => ({
+      id: item.id,
+      productName: item.product_name,
+      unitPrice: Number(item.unit_price),
+      quantity: item.quantity,
+      gstRate: Number(item.gst_rate),
+      hsnCode: item.hsn_code,
+      taxAmount: Number(item.tax_amount),
+    })),
+  };
+}
+
+function posActor(request) {
+  if (request.session?.adminEmail === adminEmail) {
+    return { email: adminEmail, name: 'Owner', isManager: true };
+  }
+  return {
+    email: request.employee.email,
+    name: request.employee.name,
+    isManager: request.employee.role === 'manager',
+  };
+}
+
+const requirePosStaff = requireAdminOrRoles('manager', 'cashier');
+
+app.get('/api/pos/session', async (request, response, next) => {
+  try {
+    if (request.session?.adminEmail === adminEmail) {
+      return response.json({ authenticated: true, name: 'Owner', role: 'owner' });
+    }
+    const employee = await loadActiveEmployee(request);
+    if (employee && ['manager', 'cashier'].includes(employee.role)) {
+      return response.json({ authenticated: true, name: employee.name, role: employee.role });
+    }
+    response.json({ authenticated: false });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/pos/products', requirePosStaff, async (_request, response, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, name, category, price, image_url AS "imageUrl", gst_rate AS "gstRate",
+         hsn_code AS "hsnCode", inventory_tracking_enabled AS "tracked",
+         stock_on_hand - reserved_quantity AS "available"
+       FROM products WHERE published = TRUE ORDER BY sort_order, name`,
+    );
+    response.json(rows.map((row) => ({
+      ...row,
+      price: Number(row.price),
+      gstRate: row.gstRate === null ? null : Number(row.gstRate),
+      available: Number(row.available),
+    })));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/pos/units/:code', requirePosStaff, async (request, response, next) => {
+  const lookup = parseUnitLookup(request.params.code);
+  if (!lookup) return response.status(400).json({ error: 'That is not an item label code.' });
+  try {
+    const { rows } = await pool.query(
+      `SELECT u.id, u.status, p.id AS "productId", p.name AS "productName"
+       FROM inventory_units u JOIN products p ON p.id = u.product_id
+       WHERE ${lookup.id ? 'u.id = $1::uuid' : "u.id::text LIKE $1 || '%'"}
+       LIMIT 2`,
+      [lookup.id || lookup.prefix],
+    );
+    if (rows.length === 0) return response.status(404).json({ error: 'No item matches that label.' });
+    if (rows.length > 1) return response.status(409).json({ error: 'That short code matches several items. Scan the QR instead.' });
+    response.json(rows[0]);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/pos/sales', requirePosStaff, async (request, response, next) => {
+  const sale = validatePosSale(request.body);
+  if (sale.error) return response.status(400).json({ error: sale.error });
+  const actor = posActor(request);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const quantities = new Map(sale.items.map((item) => [item.productId, item.quantity]));
+    const calculation = await calculateOrderLines(client, quantities);
+    if (!calculation) {
+      await client.query('ROLLBACK');
+      return response.status(400).json({ error: 'A product in the sale is unavailable.' });
+    }
+    const issue = calculation.inventoryIssue || calculation.taxIssue;
+    if (issue) {
+      await client.query('ROLLBACK');
+      return response.status(409).json({ error: issue });
+    }
+
+    const totalPaise = calculation.totalCents;
+    if (sale.amountTenderedPaise !== null && sale.amountTenderedPaise < totalPaise) {
+      await client.query('ROLLBACK');
+      return response.status(400).json({ error: 'Cash received is less than the total due.' });
+    }
+
+    const saleId = randomUUID();
+    const { rows: [{ seq }] } = await client.query("SELECT nextval('pos_receipt_seq') AS seq");
+    const receiptNumber = `POS-${seq}`;
+    const { rows: [saleRow] } = await client.query(
+      `INSERT INTO pos_sales
+         (id, receipt_number, payment_method, payment_reference, customer_name, customer_phone,
+          taxable_subtotal, tax_total, total, amount_tendered, change_due,
+          seller_legal_name, seller_gstin, recorded_by, cashier_name,
+          seller_registered_address, seller_registered_state)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+       RETURNING *`,
+      [
+        saleId, receiptNumber, sale.paymentMethod, sale.paymentReference, sale.customerName, sale.customerPhone,
+        calculation.taxableSubtotalCents / 100, calculation.taxTotalCents / 100, totalPaise / 100,
+        sale.amountTenderedPaise === null ? null : sale.amountTenderedPaise / 100,
+        sale.amountTenderedPaise === null ? null : (sale.amountTenderedPaise - totalPaise) / 100,
+        calculation.taxProfile.legalName, calculation.taxProfile.gstin, actor.email, actor.name,
+        calculation.taxProfile.registeredAddress || '', calculation.taxProfile.registeredState || '',
+      ],
+    );
+
+    const itemRows = [];
+    for (const line of calculation.orderLines) {
+      const requested = sale.items.find((item) => item.productId === line.product.id);
+      const { rows: [itemRow] } = await client.query(
+        `INSERT INTO pos_sale_items
+           (id, sale_id, product_id, product_name, unit_price, quantity, gst_rate, hsn_code, tax_amount, inventory_tracked)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+        [
+          randomUUID(), saleId, line.product.id, line.product.name, line.unitCents / 100, line.quantity,
+          line.gstRate, line.hsnCode || '', line.lineTaxCents / 100, line.inventoryTracked,
+        ],
+      );
+      itemRows.push(itemRow);
+
+      if (!line.inventoryTracked) {
+        if (requested.unitIds.length) throw Object.assign(new Error('Scanned units belong to a product without serialized stock.'), { status: 400 });
+        continue;
+      }
+
+      const unitIds = [];
+      if (requested.unitIds.length) {
+        const { rows } = await client.query(
+          `SELECT id FROM inventory_units
+           WHERE id = ANY($1::uuid[]) AND product_id = $2 AND status = 'available' FOR UPDATE`,
+          [requested.unitIds, line.product.id],
+        );
+        if (rows.length !== requested.unitIds.length) {
+          throw Object.assign(new Error('A scanned item is no longer available for this product.'), { status: 409 });
+        }
+        unitIds.push(...rows.map((row) => row.id));
+      }
+      const remaining = line.quantity - unitIds.length;
+      if (remaining > 0) {
+        const { rows } = await client.query(
+          `SELECT id FROM inventory_units
+           WHERE product_id = $1 AND status = 'available' AND id <> ALL($2::uuid[])
+           ORDER BY created_at, id LIMIT $3 FOR UPDATE SKIP LOCKED`,
+          [line.product.id, unitIds, remaining],
+        );
+        if (rows.length !== remaining) {
+          throw Object.assign(new Error(`${line.product.name} does not have enough individual units available.`), { status: 409 });
+        }
+        unitIds.push(...rows.map((row) => row.id));
+      }
+
+      await client.query(
+        `UPDATE inventory_units SET status = 'sold', pos_sale_id = $1, updated_at = NOW()
+         WHERE id = ANY($2::uuid[])`,
+        [saleId, unitIds],
+      );
+      await client.query(
+        `INSERT INTO inventory_unit_events (id, unit_id, product_id, event_type, note)
+         SELECT gen_random_uuid(), id, $1, 'sold', $2 FROM unnest($3::uuid[]) AS id`,
+        [line.product.id, `Sold in store · ${receiptNumber}`, unitIds],
+      );
+      await client.query(
+        'UPDATE products SET stock_on_hand = stock_on_hand - $1 WHERE id = $2',
+        [line.quantity, line.product.id],
+      );
+      await client.query(
+        `INSERT INTO inventory_movements
+           (id, product_id, product_name, movement_type, quantity_change, note, recorded_by)
+         VALUES ($1, $2, $3, 'sale', $4, $5, $6)`,
+        [randomUUID(), line.product.id, line.product.name, -line.quantity, `In-store sale ${receiptNumber}`, actor.email],
+      );
+    }
+    await client.query('COMMIT');
+    response.status(201).json(formatPosSale(saleRow, itemRows));
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (error.status) return response.status(error.status).json({ error: error.message });
+    next(error);
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/api/pos/sales', requirePosStaff, async (_request, response, next) => {
+  try {
+    const todayStart = "date_trunc('day', NOW() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata'";
+    const [{ rows: sales }, { rows: [summary] }] = await Promise.all([
+      pool.query('SELECT * FROM pos_sales ORDER BY created_at DESC, id LIMIT 40'),
+      pool.query(
+        `SELECT COUNT(*)::int AS "salesCount",
+           COALESCE(SUM(total), 0) AS "total",
+           COALESCE(SUM(total) FILTER (WHERE payment_method = 'cash'), 0) AS "cash",
+           COALESCE(SUM(total) FILTER (WHERE payment_method = 'upi'), 0) AS "upi",
+           COALESCE(SUM(total) FILTER (WHERE payment_method = 'card'), 0) AS "card",
+           COALESCE(SUM(tax_total), 0) AS "tax"
+         FROM pos_sales WHERE status = 'completed' AND created_at >= ${todayStart}`,
+      ),
+    ]);
+    response.json({
+      sales: sales.map((sale) => formatPosSale(sale)),
+      today: Object.fromEntries(Object.entries(summary).map(([key, value]) => [key, Number(value)])),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get('/api/pos/sales/:id', requirePosStaff, async (request, response, next) => {
+  if (!/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(request.params.id)) {
+    return response.status(404).json({ error: 'Sale not found.' });
+  }
+  try {
+    const { rows: [sale] } = await pool.query('SELECT * FROM pos_sales WHERE id = $1', [request.params.id]);
+    if (!sale) return response.status(404).json({ error: 'Sale not found.' });
+    const { rows: items } = await pool.query('SELECT * FROM pos_sale_items WHERE sale_id = $1 ORDER BY product_name', [sale.id]);
+    response.json(formatPosSale(sale, items));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/pos/sales/:id/void', requirePosStaff, async (request, response, next) => {
+  const actor = posActor(request);
+  if (!actor.isManager) return response.status(403).json({ error: 'Only the owner or a manager can void a sale.' });
+  const reason = typeof request.body?.reason === 'string' ? request.body.reason.trim() : '';
+  if (!reason || reason.length > 240) return response.status(400).json({ error: 'Enter a reason of up to 240 characters.' });
+  if (!/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(request.params.id)) {
+    return response.status(404).json({ error: 'Sale not found.' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [sale] } = await client.query('SELECT * FROM pos_sales WHERE id = $1 FOR UPDATE', [request.params.id]);
+    if (!sale) {
+      await client.query('ROLLBACK');
+      return response.status(404).json({ error: 'Sale not found.' });
+    }
+    if (sale.status !== 'completed') {
+      await client.query('ROLLBACK');
+      return response.status(409).json({ error: 'This sale was already voided.' });
+    }
+    const { rows: restored } = await client.query(
+      `UPDATE inventory_units SET status = 'available', pos_sale_id = NULL, updated_at = NOW()
+       WHERE pos_sale_id = $1 AND status = 'sold' RETURNING id, product_id`,
+      [sale.id],
+    );
+    const perProduct = new Map();
+    for (const unit of restored) perProduct.set(unit.product_id, (perProduct.get(unit.product_id) || 0) + 1);
+    for (const unit of restored) {
+      await client.query(
+        `INSERT INTO inventory_unit_events (id, unit_id, product_id, event_type, note)
+         VALUES ($1, $2, $3, 'stock_received', $4)`,
+        [randomUUID(), unit.id, unit.product_id, `Returned to stock after voided sale ${sale.receipt_number}`],
+      );
+    }
+    for (const [productId, quantity] of perProduct) {
+      const { rows: [product] } = await client.query(
+        'UPDATE products SET stock_on_hand = stock_on_hand + $1 WHERE id = $2 RETURNING name',
+        [quantity, productId],
+      );
+      await client.query(
+        `INSERT INTO inventory_movements
+           (id, product_id, product_name, movement_type, quantity_change, note, recorded_by)
+         VALUES ($1, $2, $3, 'stock_adjustment', $4, $5, $6)`,
+        [randomUUID(), productId, product.name, quantity, `Voided in-store sale ${sale.receipt_number}`, actor.email],
+      );
+    }
+    const { rows: [updated] } = await client.query(
+      `UPDATE pos_sales SET status = 'voided', void_reason = $2, voided_by = $3, voided_at = NOW()
+       WHERE id = $1 RETURNING *`,
+      [sale.id, reason, actor.email],
+    );
+    await client.query('COMMIT');
+    response.json(formatPosSale(updated));
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    next(error);
+  } finally {
+    client.release();
   }
 });
 

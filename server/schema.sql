@@ -75,6 +75,9 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS seller_legal_name VARCHAR(160);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS seller_gstin VARCHAR(15);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS seller_registered_address VARCHAR(500);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS seller_registered_state VARCHAR(80);
+CREATE SEQUENCE IF NOT EXISTS invoice_number_seq START 1001;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS invoice_number VARCHAR(30);
+CREATE UNIQUE INDEX IF NOT EXISTS orders_invoice_number_key ON orders (invoice_number) WHERE invoice_number IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS orders_customer_created_idx
   ON orders (customer_id, created_at DESC);
@@ -360,7 +363,7 @@ CREATE TABLE IF NOT EXISTS employees (
   email VARCHAR(254) NOT NULL UNIQUE,
   password_salt CHAR(32) NOT NULL,
   password_hash CHAR(128) NOT NULL,
-  role VARCHAR(24) NOT NULL CHECK (role IN ('manager', 'inventory', 'support', 'finance')),
+  role VARCHAR(24) NOT NULL CHECK (role IN ('manager', 'inventory', 'support', 'finance', 'cashier')),
   active BOOLEAN NOT NULL DEFAULT TRUE,
   auth_version INTEGER NOT NULL DEFAULT 1,
   last_login_at TIMESTAMPTZ,
@@ -416,3 +419,56 @@ ALTER TABLE crm_contact_sync
 CREATE INDEX IF NOT EXISTS crm_contact_sync_queue_idx
   ON crm_contact_sync (next_attempt_at, updated_at)
   WHERE status IN ('pending', 'failed');
+
+ALTER TABLE employees DROP CONSTRAINT IF EXISTS employees_role_check;
+ALTER TABLE employees ADD CONSTRAINT employees_role_check
+  CHECK (role IN ('manager', 'inventory', 'support', 'finance', 'cashier'));
+
+CREATE SEQUENCE IF NOT EXISTS pos_receipt_seq START 1001;
+
+CREATE TABLE IF NOT EXISTS pos_sales (
+  id UUID PRIMARY KEY,
+  receipt_number VARCHAR(24) NOT NULL UNIQUE,
+  status VARCHAR(12) NOT NULL DEFAULT 'completed' CHECK (status IN ('completed', 'voided')),
+  payment_method VARCHAR(8) NOT NULL CHECK (payment_method IN ('cash', 'upi', 'card')),
+  payment_reference VARCHAR(80) NOT NULL DEFAULT '',
+  customer_name VARCHAR(120) NOT NULL DEFAULT '',
+  customer_phone VARCHAR(10) NOT NULL DEFAULT '',
+  taxable_subtotal NUMERIC(12, 2) NOT NULL CHECK (taxable_subtotal >= 0),
+  tax_total NUMERIC(12, 2) NOT NULL CHECK (tax_total >= 0),
+  total NUMERIC(12, 2) NOT NULL CHECK (total > 0),
+  amount_tendered NUMERIC(12, 2),
+  change_due NUMERIC(12, 2),
+  seller_legal_name VARCHAR(160) NOT NULL DEFAULT '',
+  seller_gstin VARCHAR(15) NOT NULL DEFAULT '',
+  recorded_by VARCHAR(254) NOT NULL,
+  cashier_name VARCHAR(120) NOT NULL DEFAULT '',
+  void_reason VARCHAR(240),
+  voided_by VARCHAR(254),
+  voided_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS pos_sales_created_idx ON pos_sales (created_at DESC, id);
+
+CREATE TABLE IF NOT EXISTS pos_sale_items (
+  id UUID PRIMARY KEY,
+  sale_id UUID NOT NULL REFERENCES pos_sales(id) ON DELETE CASCADE,
+  product_id UUID REFERENCES products(id) ON DELETE SET NULL,
+  product_name VARCHAR(120) NOT NULL,
+  unit_price NUMERIC(10, 2) NOT NULL CHECK (unit_price > 0),
+  quantity INTEGER NOT NULL CHECK (quantity > 0 AND quantity <= 99),
+  gst_rate NUMERIC(5, 2) NOT NULL,
+  hsn_code VARCHAR(8) NOT NULL DEFAULT '',
+  tax_amount NUMERIC(12, 2) NOT NULL,
+  inventory_tracked BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE INDEX IF NOT EXISTS pos_sale_items_sale_idx ON pos_sale_items (sale_id);
+
+ALTER TABLE inventory_units
+  ADD COLUMN IF NOT EXISTS pos_sale_id UUID REFERENCES pos_sales(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS inventory_units_pos_sale_idx
+  ON inventory_units (pos_sale_id) WHERE pos_sale_id IS NOT NULL;
+ALTER TABLE pos_sales ADD COLUMN IF NOT EXISTS seller_registered_address TEXT NOT NULL DEFAULT '';
+ALTER TABLE pos_sales ADD COLUMN IF NOT EXISTS seller_registered_state VARCHAR(80) NOT NULL DEFAULT '';

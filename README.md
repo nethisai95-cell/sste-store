@@ -107,3 +107,19 @@ npm start
 Set `NODE_ENV=production`, use HTTPS, and provide production-only `DATABASE_URL`, `SESSION_SECRET`, `ADMIN_EMAIL`, and `ADMIN_PASSWORD_HASH` values through the deployment environment. Configure SMTP recovery credentials as required. The server serves the built frontend and API from the same origin. Never expose the database URL, owner password, or SMTP credentials to Vite or browser code.
 
 In local development, a separate test-only UPI simulation is available; successful simulation records `demo_paid` / `demo_upi`, while failed simulation places no order. The simulation never contacts a bank or UPI app and never moves money. Real Razorpay checkouts are available only when server-side credentials are configured. The app does not yet integrate cash on delivery, general order email notifications, carrier tracking, customer profile management, data import/export, or file uploads. Configure India-specific shipping, tax/GST, refund, privacy, and consumer-protection policies with the relevant business providers before production.
+
+## QR scanning and in-store POS
+
+- Owner, employee and delivery screens have a **Scan QR** button (camera, with manual code entry). Per-product **Label sheet** prints all unit labels.
+- **POS** lives at `/pos`. Sign in as owner, manager or cashier (create cashiers in Admin > Employees). Supports cash/UPI/card, scanned units, receipts, and voids (owner/manager only).
+- POS sales are stored separately (`pos_sales`) and are not included in the online finance/analytics dashboards.
+
+## Website, installable app, Play Store and App Store
+
+- **Website / PWA:** the site ships a web manifest, icons and a service worker, so it can be installed from the browser ("Install app" / "Add to Home Screen"). It shows an offline page when there is no connection. API calls are never cached. The service worker only registers in production builds (`npm run build`).
+- **Native apps (Capacitor):** `android/` and `ios/` are shells around your deployed HTTPS site, so sign-in cookies, the API and payments stay same-origin.
+  1. Deploy the app (`npm run build`, then `node server/index.js` with `NODE_ENV=production`) behind HTTPS.
+  2. `npm run cap:sync -- https://your-site.example` sets the site URL and syncs both projects.
+  3. Android: `npx cap open android`, then build a signed AAB in Android Studio and upload it to Google Play Console.
+  4. iOS: needs a Mac with Xcode and an Apple Developer account. `npx cap open ios`, set the signing team, archive and upload to App Store Connect.
+- Camera access (QR scanning) is declared for both platforms. Replace the placeholder app icon/splash (`public/icon.svg`, `android/`, `ios/`) with final artwork before publishing. Apple may reject apps that only wrap a website, so consider adding native features before submitting.

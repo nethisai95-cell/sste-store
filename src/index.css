@@ -2390,6 +2390,414 @@ button:hover {
   padding-left: 1.15rem;
 }
 
+.pos-shell {
+  max-width: 82rem;
+  margin: 0 auto;
+  padding: 1rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.pos-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24rem;
+  gap: 1rem;
+  align-items: start;
+}
+
+.pos-catalog {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.pos-toolbar,
+.pos-wand,
+.pos-categories,
+.pos-methods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.pos-toolbar input,
+.pos-wand input {
+  flex: 1;
+  min-width: 10rem;
+}
+
+.pos-products {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: 0.75rem;
+}
+
+.pos-product {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.5rem;
+  text-align: left;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.pos-product:hover:not(:disabled) {
+  border-color: #111;
+}
+
+.pos-product:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pos-product img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.pos-cart {
+  position: sticky;
+  top: 1rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.pos-lines,
+.pos-sale-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.pos-lines li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.pos-lines small {
+  display: block;
+  color: #666;
+}
+
+.pos-qty {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.pos-qty button {
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.pos-totals,
+.pos-receipt dl {
+  margin: 0;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.pos-totals div,
+.pos-receipt dl div {
+  display: flex;
+  justify-content: space-between;
+}
+
+.pos-totals dd,
+.pos-receipt dd {
+  margin: 0;
+}
+
+.pos-grand,
+.pos-receipt-total {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.pos-change {
+  margin: 0;
+  font-weight: 600;
+  color: #15803d;
+}
+
+.pos-charge {
+  min-height: 3rem;
+  font-size: 1.05rem;
+}
+
+.pos-customer {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.pos-sale-list li {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #eee;
+}
+
+.pos-sale-list li span {
+  display: block;
+  color: #666;
+  font-size: 0.85rem;
+}
+
+.pos-voided {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+.pos-receipt {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.pos-receipt h2,
+.pos-receipt p {
+  margin: 0;
+}
+
+.pos-receipt table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.pos-receipt th,
+.pos-receipt td {
+  padding: 0.2rem 0;
+  text-align: left;
+  vertical-align: top;
+}
+
+.pos-receipt td small {
+  display: block;
+  color: #666;
+}
+
+.pos-receipt-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.pos-receipt {
+  font-family: 'Courier New', ui-monospace, monospace;
+  color: #111;
+}
+
+.pos-receipt h2 {
+  text-align: center;
+  font-size: 1.1rem;
+  text-transform: uppercase;
+}
+
+.pos-receipt .pos-center {
+  text-align: center;
+}
+
+.pos-receipt .pos-muted {
+  color: #555;
+  font-size: 0.75rem;
+}
+
+.pos-receipt .pos-thanks {
+  font-weight: 700;
+  padding-top: 0.35rem;
+  border-top: 1px dashed #111;
+}
+
+.pos-receipt .pos-doc-title {
+  margin: 0.2rem 0;
+  padding: 0.2rem 0;
+  border-top: 1px dashed #111;
+  border-bottom: 1px dashed #111;
+  text-align: center;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.pos-receipt .pos-void-banner {
+  padding: 0.2rem;
+  border: 2px solid #9b2d2d;
+  color: #9b2d2d;
+  font-weight: 700;
+  text-align: center;
+}
+
+.pos-receipt-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.1rem 0.6rem;
+}
+
+.pos-receipt-meta > :nth-child(even) {
+  text-align: right;
+}
+
+.pos-receipt th {
+  border-bottom: 1px dashed #111;
+}
+
+.pos-receipt tbody tr:last-child td {
+  padding-bottom: 0.35rem;
+  border-bottom: 1px dashed #111;
+}
+
+.pos-receipt .num {
+  text-align: right;
+  white-space: nowrap;
+  padding-left: 0.3rem;
+}
+
+.pos-receipt dl {
+  padding-top: 0.2rem;
+}
+
+.pos-receipt .pos-receipt-total {
+  margin: 0.2rem 0;
+  padding: 0.25rem 0;
+  border-top: 1px solid #111;
+  border-bottom: 1px solid #111;
+}
+
+@media (max-width: 860px) {
+  .pos-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pos-cart {
+    position: static;
+  }
+
+  .pos-sale-list li {
+    grid-template-columns: 1fr auto;
+  }
+}
+
+.qr-scanner-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(10, 10, 10, 0.72);
+}
+
+.qr-scanner-card {
+  width: min(28rem, 100%);
+  max-height: 100%;
+  overflow: auto;
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.qr-scanner-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.qr-scanner-view {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #111;
+}
+
+.qr-scanner-view video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.qr-scanner-frame {
+  position: absolute;
+  inset: 18%;
+  border: 3px solid #4ade80;
+  border-radius: 12px;
+  box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.35);
+}
+
+.qr-scanner-hint {
+  margin: 0;
+  color: #555;
+  font-size: 0.9rem;
+}
+
+.qr-scanner-result {
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  background: #ecfdf3;
+  font-weight: 600;
+}
+
+.qr-scanner-manual {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.qr-scanner-manual input {
+  flex: 1;
+  min-width: 0;
+}
+
+.qr-label-sheet-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.qr-label-sheet {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.qr-sheet-label {
+  display: grid;
+  gap: 0.2rem;
+  justify-items: center;
+  padding: 0.5rem;
+  border: 1px dashed #bbb;
+  text-align: center;
+  font-size: 0.75rem;
+}
+
+.qr-sheet-label img {
+  width: 100%;
+  max-width: 7rem;
+}
+
+.qr-sheet-label strong {
+  font-family: ui-monospace, monospace;
+  font-size: 0.95rem;
+  letter-spacing: 0.05em;
+}
+
 .admin-unit-row > .admin-qr-label {
   grid-column: 1 / -1;
   margin: 0;
@@ -2604,8 +3012,8 @@ button:hover {
     visibility: hidden !important;
   }
 
-  .admin-qr-label,
-  .admin-qr-label * {
+  body:has(.admin-qr-label) .admin-qr-label,
+  body:has(.admin-qr-label) .admin-qr-label * {
     visibility: visible !important;
   }
 
@@ -2618,12 +3026,61 @@ button:hover {
     border-radius: 0;
   }
 
+  body:has(.pos-receipt) * {
+    visibility: hidden !important;
+  }
+
+  body:has(.pos-receipt) .pos-receipt,
+  body:has(.pos-receipt) .pos-receipt * {
+    visibility: visible !important;
+  }
+
+  .pos-receipt {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 76mm;
+    font-size: 11px;
+  }
+
+  body:has(.qr-label-sheet) .admin-qr-label,
+  body:has(.qr-label-sheet) .admin-qr-label * {
+    visibility: hidden !important;
+  }
+
+  body:has(.qr-label-sheet) .qr-label-sheet,
+  body:has(.qr-label-sheet) .qr-label-sheet * {
+    visibility: visible !important;
+  }
+
+  .qr-label-sheet {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4mm;
+  }
+
+  .qr-sheet-label {
+    break-inside: avoid;
+    border: 1px solid #222;
+  }
+
+  .qr-sheet-actions {
+    display: none !important;
+  }
+
   body:has(.tax-draft-invoice) * {
     visibility: hidden !important;
   }
 
-  .tax-draft-invoice,
-  .tax-draft-invoice * {
+  body:has(.tax-draft-invoice) .tax-draft-invoice,
+  body:has(.tax-draft-invoice) .tax-draft-invoice * {
     visibility: visible !important;
   }
 
@@ -2636,38 +3093,186 @@ button:hover {
     background: #fff;
     color: #111;
     font: 11pt/1.45 Arial, sans-serif;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
   .tax-draft-invoice h1 {
-    margin: 0 0 0.4rem;
+    margin: 0;
     font-size: 18pt;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    text-align: right;
   }
 
-  .tax-draft-invoice h2 {
-    margin: 1rem 0 0.35rem;
+  .tax-draft-invoice .invoice-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1.5rem;
+    padding-bottom: 0.6rem;
+    border-bottom: 2px solid #111;
+  }
+
+  .tax-draft-invoice .invoice-seller h2 {
+    margin: 0 0 0.2rem;
+    font-size: 15pt;
+  }
+
+  .tax-draft-invoice .invoice-seller p {
+    margin: 0;
+    font-size: 10pt;
+  }
+
+  .tax-draft-invoice .invoice-title span {
+    display: block;
+    text-align: right;
+    color: #555;
+    font-size: 9pt;
+  }
+
+  .tax-draft-invoice .invoice-meta,
+  .tax-draft-invoice .invoice-parties {
+    display: flex;
+    justify-content: space-between;
+    gap: 1.5rem;
+    margin-top: 0.8rem;
+  }
+
+  .tax-draft-invoice .invoice-meta dl {
+    flex: 1;
+    margin: 0;
+  }
+
+  .tax-draft-invoice .invoice-meta dl div {
+    display: flex;
+    gap: 0.6rem;
+  }
+
+  .tax-draft-invoice .invoice-meta dt {
+    min-width: 7.5rem;
+    color: #555;
+  }
+
+  .tax-draft-invoice .invoice-meta dd {
+    margin: 0;
+    font-weight: 700;
+  }
+
+  .tax-draft-invoice .invoice-parties > div {
+    flex: 1;
+    padding: 0.5rem 0.7rem;
+    border: 1px solid #888;
+  }
+
+  .tax-draft-invoice h3 {
+    margin: 0 0 0.25rem;
+    color: #555;
+    font-size: 9pt;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .tax-draft-invoice .invoice-parties p {
+    margin: 0;
+  }
+
+  .tax-draft-invoice .num {
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .tax-draft-invoice .invoice-summary {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1.5rem;
+    break-inside: avoid;
+  }
+
+  .tax-draft-invoice .invoice-words {
+    flex: 1;
+    margin: 1rem 0 0;
+  }
+
+  .tax-draft-invoice .invoice-totals {
+    width: 45%;
+  }
+
+  .tax-draft-invoice .invoice-grand td {
+    background: #eee;
     font-size: 12pt;
+  }
+
+  .tax-draft-invoice .invoice-hsn {
+    font-size: 9pt;
+    break-inside: avoid;
+  }
+
+  .tax-draft-invoice .invoice-note {
+    color: #555;
+    font-size: 9pt;
+  }
+
+  .tax-draft-invoice .invoice-footer {
+    display: flex;
+    justify-content: space-between;
+    gap: 2rem;
+    margin-top: 1.5rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid #888;
+    break-inside: avoid;
+  }
+
+  .tax-draft-invoice .invoice-terms {
+    flex: 1;
+    font-size: 9pt;
+  }
+
+  .tax-draft-invoice .invoice-sign {
+    min-width: 12rem;
+    text-align: center;
+  }
+
+  .tax-draft-invoice .invoice-sign p {
+    margin: 0 0 3rem;
+    font-weight: 700;
+  }
+
+  .tax-draft-invoice .invoice-sign span {
+    display: block;
+    padding-top: 0.25rem;
+    border-top: 1px solid #111;
+    font-size: 9pt;
   }
 
   .tax-draft-invoice table {
     width: 100%;
-    margin: 1rem 0;
+    margin: 1rem 0 0;
     border-collapse: collapse;
+  }
+
+  .tax-draft-invoice thead th {
+    background: #eee;
+  }
+
+  .tax-draft-invoice tr {
+    break-inside: avoid;
   }
 
   .tax-draft-invoice th,
   .tax-draft-invoice td {
-    padding: 0.4rem;
+    padding: 0.35rem 0.4rem;
     border: 1px solid #888;
     text-align: left;
   }
 
-  .tax-invoice-watermark {
-    padding: 0.5rem;
-    border: 2px solid #9b2d2d;
-    color: #9b2d2d;
-    font-size: 16pt;
-    font-weight: 700;
-    text-align: center;
+  .tax-draft-invoice .num {
+    text-align: right;
+  }
+
+  @page {
+    margin: 12mm;
   }
 
   .admin-qr-print-button {

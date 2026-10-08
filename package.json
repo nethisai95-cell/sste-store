@@ -5,9 +5,11 @@
   "private": true,
   "scripts": {
     "dev": "node server/dev.js",
+    "dev:phone": "node server/dev.js --https",
+    "cap:sync": "node scripts/cap-sync.mjs",
     "build": "vite build",
     "test": "node --test",
-    "test:unit": "node --test tests/order-validation.test.js tests/delivery-transitions.test.js tests/payment-methods.test.js tests/finance-validation.test.js",
+    "test:unit": "node --test tests/invoice.test.js tests/pos-validation.test.js tests/qr-scan.test.js tests/order-validation.test.js tests/delivery-transitions.test.js tests/payment-methods.test.js tests/finance-validation.test.js",
     "preview": "vite preview --host 0.0.0.0",
     "start": "node server/index.js",
     "admin:hash": "node server/hash-password.js"
@@ -17,12 +19,14 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@capacitor/core": "^8.5.3",
     "connect-pg-simple": "^10.0.0",
     "dotenv": "^18.0.6",
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.1",
     "express-session": "^1.19.0",
     "helmet": "^8.3.0",
+    "jsqr": "^1.4.0",
     "nodemailer": "^10.0.16",
     "pg": "^8.23.1",
     "qrcode": "^1.5.4",
@@ -31,6 +35,10 @@
     "react-dom": "^19.3.0"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/cli": "^8.5.3",
+    "@capacitor/ios": "^8.5.3",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "vite": "^8.3.3"
   }

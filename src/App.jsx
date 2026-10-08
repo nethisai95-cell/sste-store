@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { razorpayMethodOptions } from './payment-methods.js';
+import { parseQrPayload, unitShortCode } from './qr-scan.js';
+import PosApp from './Pos.jsx';
+import { buildInvoice } from './invoice.js';
 
 const categories = ['All', 'Furniture', 'Lighting', 'Decor', 'Storage'];
 const razorpayPaymentMethods = [
@@ -77,6 +80,131 @@ const indiaDateTime = new Intl.DateTimeFormat('en-IN', {
   timeZone: 'Asia/Kolkata',
 });
 
+function OrderInvoice({ order }) {
+  const invoice = buildInvoice(order);
+  const intra = invoice.intraState;
+  const isTaxInvoice = invoice.title === 'Tax Invoice';
+  const paid = order.paymentStatus === 'razorpay_paid';
+  return (
+    <section className="tax-draft-invoice" aria-label={`${invoice.title} ${invoice.invoiceNumber}`}>
+      <header className="invoice-header">
+        <div className="invoice-seller">
+          <h2>{order.sellerLegalName || 'Business legal name not configured'}</h2>
+          <p>
+            {order.sellerRegisteredAddress || 'Registered address not configured'}<br />
+            {order.sellerRegisteredState || 'State not configured'}
+            {order.sellerGstin ? <><br /><strong>GSTIN: {order.sellerGstin}</strong></> : null}
+          </p>
+        </div>
+        <div className="invoice-title">
+          <h1>{invoice.title}</h1>
+          <span>Original for recipient</span>
+        </div>
+      </header>
+      <div className="invoice-meta">
+        <dl>
+          <div><dt>Invoice no</dt><dd>{invoice.invoiceNumber}</dd></div>
+          <div><dt>Invoice date</dt><dd>{indiaDate.format(new Date(order.created_at))}</dd></div>
+          <div><dt>Order no</dt><dd>{order.orderNumber}</dd></div>
+        </dl>
+        <dl>
+          <div><dt>Payment</dt><dd>{paid ? 'Paid online' : order.paymentStatus === 'demo_paid' ? 'Demo payment (test)' : order.paymentMethod || 'Pending'}</dd></div>
+          <div><dt>Place of supply</dt><dd>{order.state || '—'}</dd></div>
+          <div><dt>Reverse charge</dt><dd>No</dd></div>
+        </dl>
+      </div>
+      <div className="invoice-parties">
+        <div>
+          <h3>Billed to</h3>
+          <p>
+            <strong>{order.recipientName || 'Customer'}</strong><br />
+            {order.addressLine1}{order.addressLine2 ? `, ${order.addressLine2}` : ''}<br />
+            {order.city}, {order.state} {order.postalCode}
+            {order.phone ? <><br />Phone: {order.phone}</> : null}
+          </p>
+        </div>
+        <div>
+          <h3>Shipped to</h3>
+          <p>
+            <strong>{order.recipientName || 'Customer'}</strong><br />
+            {order.addressLine1}{order.addressLine2 ? `, ${order.addressLine2}` : ''}<br />
+            {order.city}, {order.state} {order.postalCode}
+          </p>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>#</th><th>Item</th><th>HSN/SAC</th><th>Qty</th><th>Rate</th><th>Taxable value</th>
+            {invoice.hasTax && (intra ? <><th>CGST</th><th>SGST</th></> : <th>IGST</th>)}
+            <th>Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {invoice.lines.map((line, index) => (
+            <tr key={line.id}>
+              <td>{index + 1}</td>
+              <td>{line.name}{line.gstRate !== null && line.gstRate !== undefined ? <><br /><small>GST {line.gstRate}%</small></> : null}</td>
+              <td>{line.hsnCode || '—'}</td>
+              <td>{line.quantity}</td>
+              <td className="num">{money.format(line.price)}</td>
+              <td className="num">{money.format(line.taxable)}</td>
+              {invoice.hasTax && (intra
+                ? <><td className="num">{money.format(line.cgst)}</td><td className="num">{money.format(line.sgst)}</td></>
+                : <td className="num">{money.format(line.igst)}</td>)}
+              <td className="num">{money.format(line.lineTotal)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {invoice.hasTax && (
+        <table className="invoice-hsn">
+          <thead>
+            <tr>
+              <th>HSN/SAC</th><th>Taxable value</th><th>GST rate</th>
+              {intra ? <><th>CGST</th><th>SGST</th></> : <th>IGST</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {invoice.hsnSummary.map((row) => (
+              <tr key={`${row.hsnCode}-${row.gstRate}`}>
+                <td>{row.hsnCode || '—'}</td>
+                <td className="num">{money.format(row.taxable)}</td>
+                <td className="num">{row.gstRate ?? '—'}%</td>
+                {intra ? <><td className="num">{money.format(row.cgst)}</td><td className="num">{money.format(row.sgst)}</td></> : <td className="num">{money.format(row.igst)}</td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div className="invoice-summary">
+        <p className="invoice-words"><strong>Amount in words</strong><br />{invoice.totalInWords}<br /><small>Total quantity: {invoice.totalQuantity}</small></p>
+        <table className="invoice-totals">
+          <tbody>
+            <tr><td>Taxable value</td><td className="num">{money.format(invoice.taxable)}</td></tr>
+            {invoice.hasTax && (intra
+              ? <><tr><td>CGST</td><td className="num">{money.format(invoice.cgst)}</td></tr><tr><td>SGST</td><td className="num">{money.format(invoice.sgst)}</td></tr></>
+              : <tr><td>IGST</td><td className="num">{money.format(invoice.igst)}</td></tr>)}
+            <tr className="invoice-grand"><td><strong>Total</strong></td><td className="num"><strong>{money.format(invoice.total)}</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+      {!isTaxInvoice && <p className="invoice-note">{invoice.title === 'Bill of Supply' ? 'Seller is not registered for GST; no tax is charged.' : 'No GST charged on the items in this order.'}</p>}
+      <footer className="invoice-footer">
+        <div className="invoice-terms">
+          <h3>Declaration</h3>
+          <p>We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.</p>
+          <p className="invoice-note">This is a computer-generated invoice and does not require a signature.</p>
+        </div>
+        <div className="invoice-sign">
+          <p>For {order.sellerLegalName || 'the seller'}</p>
+          <span>Authorised signatory</span>
+        </div>
+      </footer>
+    </section>
+  );
+}
+
 function AdminQrLabel({
   url,
   title,
@@ -109,6 +237,132 @@ function AdminQrLabel({
           Print QR label
         </button>
       </div>
+    </div>
+  );
+}
+
+function QrScannerDialog({ title, hint, continuous = false, onScan, onClose }) {
+  const videoRef = useRef(null);
+  const onScanRef = useRef(onScan);
+  const [cameraError, setCameraError] = useState('');
+  const [manual, setManual] = useState('');
+  const [lastResult, setLastResult] = useState('');
+  onScanRef.current = onScan;
+
+  useEffect(() => {
+    let stopped = false;
+    let stream;
+    let timer;
+    const recent = new Map();
+    const handle = async (text) => {
+      const now = Date.now();
+      if (now - (recent.get(text) || 0) < 3000) return false;
+      recent.set(text, now);
+      const message = await onScanRef.current(text);
+      if (message) setLastResult(message);
+      return true;
+    };
+
+    const start = async () => {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCameraError('Camera is not available here (it needs HTTPS or localhost). Type the code below instead.');
+        return;
+      }
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+      } catch {
+        setCameraError('Camera permission was blocked. Allow camera access, or type the code below.');
+        return;
+      }
+      if (stopped) { stream.getTracks().forEach((track) => track.stop()); return; }
+      const video = videoRef.current;
+      video.srcObject = stream;
+      await video.play().catch(() => {});
+
+      const detector = 'BarcodeDetector' in window ? new window.BarcodeDetector({ formats: ['qr_code'] }) : null;
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      let jsQR = null;
+      if (!detector) jsQR = (await import('jsqr')).default;
+
+      const tick = async () => {
+        if (stopped) return;
+        let found = '';
+        if (video.readyState >= 2 && video.videoWidth) {
+          try {
+            if (detector) {
+              found = (await detector.detect(video))[0]?.rawValue || '';
+            } else {
+              canvas.width = video.videoWidth;
+              canvas.height = video.videoHeight;
+              context.drawImage(video, 0, 0);
+              found = jsQR(context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height)?.data || '';
+            }
+          } catch {
+            found = '';
+          }
+        }
+        if (found && await handle(found) && !continuous) return;
+        timer = window.setTimeout(tick, 250);
+      };
+      tick();
+    };
+    start();
+
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+      stream?.getTracks().forEach((track) => track.stop());
+    };
+  }, [continuous]);
+
+  const submitManual = async (event) => {
+    event.preventDefault();
+    const value = manual.trim();
+    if (!value) return;
+    setManual('');
+    const message = await onScanRef.current(value);
+    if (message) setLastResult(message);
+  };
+
+  return (
+    <div className="qr-scanner-backdrop" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="qr-scanner-card">
+        <div className="qr-scanner-head">
+          <strong>{title}</strong>
+          <button className="ghost-button" type="button" onClick={onClose}>Done</button>
+        </div>
+        {cameraError ? <p className="admin-login-error" role="alert">{cameraError}</p> : (
+          <div className="qr-scanner-view">
+            <video ref={videoRef} playsInline muted />
+            <span className="qr-scanner-frame" aria-hidden="true" />
+          </div>
+        )}
+        <p className="qr-scanner-hint">{hint}</p>
+        {lastResult && <p className="qr-scanner-result" role="status">{lastResult}</p>}
+        <form className="qr-scanner-manual" onSubmit={submitManual}>
+          <input value={manual} onChange={(event) => setManual(event.target.value)} placeholder="Type or paste a code, e.g. 3F2B8C1E" aria-label="Label code" />
+          <button className="secondary-button" type="submit">Look up</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function QrSheetLabel({ url, code, name }) {
+  const [imageUrl, setImageUrl] = useState('');
+  useEffect(() => {
+    let active = true;
+    QRCode.toDataURL(url, { errorCorrectionLevel: 'Q', margin: 1, width: 200 })
+      .then((result) => { if (active) setImageUrl(result); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [url]);
+  return (
+    <div className="qr-sheet-label">
+      {imageUrl ? <img src={imageUrl} alt={`QR code ${code}`} /> : <span>…</span>}
+      <strong>{code}</strong>
+      <span>{name}</span>
     </div>
   );
 }
@@ -370,6 +624,7 @@ function App() {
   const isAccountPath = typeof window !== 'undefined' && window.location.pathname === '/account';
   const isDeliveryPath = typeof window !== 'undefined' && window.location.pathname === '/delivery';
   const isEmployeePath = typeof window !== 'undefined' && window.location.pathname === '/employee';
+  const isPosPath = typeof window !== 'undefined' && window.location.pathname === '/pos';
   const [adminMode, setAdminMode] = useState(false);
   const [adminChecking, setAdminChecking] = useState(isAdminPath);
   const [deliveryChecking, setDeliveryChecking] = useState(isDeliveryPath);
@@ -395,6 +650,8 @@ function App() {
   const [deliveryError, setDeliveryError] = useState('');
   const [deliveryRecovering, setDeliveryRecovering] = useState(false);
   const [deliveryNotice, setDeliveryNotice] = useState('');
+  const [scannerMode, setScannerMode] = useState('');
+  const [labelSheetProductId, setLabelSheetProductId] = useState('');
   const [deliveryPinDrafts, setDeliveryPinDrafts] = useState({});
   const [deliveryNoteDrafts, setDeliveryNoteDrafts] = useState({});
   const [deliveryFocusUnitId, setDeliveryFocusUnitId] = useState(
@@ -443,6 +700,7 @@ function App() {
   const [adminDeliveries, setAdminDeliveries] = useState([]);
   const [pickupAddress, setPickupAddress] = useState('');
   const [newDeliveryAgent, setNewDeliveryAgent] = useState({ name: '', email: '', password: '' });
+  const [deliveryAgentNotice, setDeliveryAgentNotice] = useState({ type: '', text: '' });
   const [deliveryAgentDrafts, setDeliveryAgentDrafts] = useState({});
   const [deliveryAssignmentDrafts, setDeliveryAssignmentDrafts] = useState({});
   const [qrFocus, setQrFocus] = useState(() => {
@@ -1386,6 +1644,32 @@ function App() {
     }
   };
 
+  const handleAdminScan = async (text) => {
+    const parsed = parseQrPayload(text);
+    if (!parsed || parsed.type === 'short') {
+      return parsed ? 'Short codes need the full QR scan or unit ID here.' : 'Not an SSTE QR code.';
+    }
+    setAdminError('');
+    setQrFocus({ type: parsed.type, id: parsed.id });
+    setScannerMode('');
+    return '';
+  };
+
+  const handleDeliveryScan = async (text) => {
+    const parsed = parseQrPayload(text);
+    if (!parsed || parsed.type === 'order') return 'Not a parcel item label.';
+    const units = deliveryAssignments.flatMap((delivery) => delivery.items.flatMap((line) => line.units
+      .map((unit) => ({ unit, delivery }))));
+    const match = units.find(({ unit }) => (parsed.type === 'short'
+      ? unitShortCode(unit.id) === parsed.id.toUpperCase()
+      : unit.id === parsed.id));
+    if (!match) return '✗ Not part of a delivery assigned to you.';
+    if (match.unit.pickedUp) return `Already scanned · ${unitShortCode(match.unit.id)}`;
+    if (!['assigned', 'picked_up'].includes(match.delivery.deliveryStatus)) return '✗ This delivery is no longer at pickup stage.';
+    await pickupDeliveryUnit(match.unit.id);
+    return `✓ Scanned ${unitShortCode(match.unit.id)}`;
+  };
+
   const pickupDeliveryUnit = async (unitId) => {
     setDeliveryError('');
     setDeliveryNotice('');
@@ -1433,9 +1717,26 @@ function App() {
     }
   };
 
+  const printInvoice = async (order) => {
+    setAdminError('');
+    try {
+      const { invoiceNumber } = await apiRequest(`/api/admin/orders/${encodeURIComponent(order.id)}/invoice`, { method: 'POST' });
+      const numbered = { ...order, invoiceNumber };
+      setAdminOrders((previous) => previous.map((item) => (item.id === order.id ? numbered : item)));
+      setTaxInvoiceOrder(numbered);
+    } catch (error) {
+      setAdminError(error.message);
+    }
+  };
+
   const createDeliveryAgent = async (event) => {
     event.preventDefault();
     setAdminError('');
+    setDeliveryAgentNotice({ type: '', text: '' });
+    if (newDeliveryAgent.password.length < 12) {
+      setDeliveryAgentNotice({ type: 'error', text: 'Password must be at least 12 characters.' });
+      return;
+    }
     try {
       const agent = await apiRequest('/api/admin/delivery/agents', {
         method: 'POST',
@@ -1443,8 +1744,9 @@ function App() {
       });
       setDeliveryAgents((previous) => [agent, ...previous]);
       setNewDeliveryAgent({ name: '', email: '', password: '' });
+      setDeliveryAgentNotice({ type: 'success', text: `Created ${agent.email}. They can sign in at /delivery.` });
     } catch (error) {
-      setAdminError(error.message);
+      setDeliveryAgentNotice({ type: 'error', text: error.message });
     }
   };
 
@@ -1655,7 +1957,7 @@ function App() {
         body: JSON.stringify(adminTaxProfile),
       });
       setAdminTaxProfile(result);
-      setTaxProfileNotice('Business tax profile saved. Printable invoices remain marked DRAFT for tax review.');
+      setTaxProfileNotice('Business tax profile saved.');
     } catch (error) {
       setAdminError(error.message);
     }
@@ -1826,6 +2128,7 @@ function App() {
       inventory: 'Inventory',
       support: 'Customer support',
       finance: 'Finance',
+      cashier: 'In-store cashier',
     };
     return (
       <>
@@ -1849,6 +2152,14 @@ function App() {
           </section>
           {employeeError && <p className="admin-login-error" role="alert">{employeeError}</p>}
           {employeeNotice && <p className="account-notice" role="status">{employeeNotice}</p>}
+
+          {['manager', 'cashier'].includes(employee.role) && (
+            <section className="admin-panel">
+              <h2>In-store sales</h2>
+              <p>Ring up walk-in customers, scan item labels and print receipts.</p>
+              <a className="primary-button" href="/pos">Open point of sale</a>
+            </section>
+          )}
 
           {employee.role === 'manager' && employeeWorkspace && (
             <section className="finance-kpi-grid">
@@ -1955,6 +2266,10 @@ function App() {
           </div>
 
           <div className="header-actions">
+            <a className="ghost-button" href="/pos">Open POS</a>
+            <button className="primary-button" onClick={() => setScannerMode('admin')}>
+              Scan QR
+            </button>
             <button className="ghost-button" onClick={handleAdminLogout}>
               Sign out
             </button>
@@ -1963,6 +2278,14 @@ function App() {
             </a>
           </div>
         </header>
+        {scannerMode === 'admin' && (
+          <QrScannerDialog
+            title="Scan a product, unit or order QR"
+            hint="Point the camera at any SSTE label to jump straight to that record."
+            onScan={handleAdminScan}
+            onClose={() => setScannerMode('')}
+          />
+        )}
 
         <main className="admin-shell">
           <section className="admin-hero">
@@ -2242,13 +2565,6 @@ function App() {
                     <p className="admin-ai-setup-note" role="status">
                       Add <code>GEMINI_API_KEY</code> to the server's private environment and restart the API to enable this analyst. The key is never sent to the browser or displayed here.
                     </p>
-                  )}
-                  {order.taxTotal !== null && order.taxTotal !== undefined ? (
-                    <p className="order-tax-summary">
-                      Taxable items {money.format(order.taxableSubtotal)} · GST {money.format(order.taxTotal)}
-                    </p>
-                  ) : (
-                    <p className="order-tax-summary">Tax details were not captured for this historical order.</p>
                   )}
                   <div className="admin-ai-suggestions" aria-label="Suggested questions">
                     {[
@@ -2634,6 +2950,7 @@ function App() {
                   <option value="inventory">Inventory</option>
                   <option value="support">Customer support</option>
                   <option value="finance">Finance</option>
+                  <option value="cashier">In-store cashier</option>
                 </select></label>
                 <label>Temporary initial password<input type="password" autoComplete="new-password" required minLength="12" maxLength="256" value={newEmployee.password} onChange={(event) => setNewEmployee((previous) => ({ ...previous, password: event.target.value }))} /></label>
               </div>
@@ -2650,6 +2967,7 @@ function App() {
                       <option value="inventory">Inventory</option>
                       <option value="support">Customer support</option>
                       <option value="finance">Finance</option>
+                      <option value="cashier">In-store cashier</option>
                     </select></label>
                   </div>
                   <div className="employee-admin-actions">
@@ -2798,12 +3116,40 @@ function App() {
                             {activeAdminQr?.type === 'unit' && activeAdminQr.id === unit.id && (
                               <AdminQrLabel
                                 title={`${product.name} · unique unit`}
-                                identifier={`Unit ID · ${unit.id}`}
+                                identifier={`Code ${unitShortCode(unit.id)} · ${unit.id}`}
                                 url={`${window.location.origin}/admin?unit=${encodeURIComponent(unit.id)}`}
                               />
                             )}
                           </article>
                         ))}
+                        {(inventoryUnitsByProduct[product.id]?.units?.length || 0) > 0 && (
+                          <div className="qr-label-sheet-toolbar">
+                            <button
+                              type="button"
+                              className="secondary-button"
+                              onClick={() => setLabelSheetProductId(labelSheetProductId === product.id ? '' : product.id)}
+                            >
+                              {labelSheetProductId === product.id ? 'Hide label sheet' : `Label sheet (${inventoryUnitsByProduct[product.id].units.length})`}
+                            </button>
+                            {labelSheetProductId === product.id && (
+                              <button type="button" className="primary-button" onClick={() => window.print()}>
+                                Print all labels
+                              </button>
+                            )}
+                          </div>
+                        )}
+                        {labelSheetProductId === product.id && (
+                          <div className="qr-label-sheet">
+                            {inventoryUnitsByProduct[product.id].units.map((unit) => (
+                              <QrSheetLabel
+                                key={unit.id}
+                                code={unitShortCode(unit.id)}
+                                name={product.name}
+                                url={`${window.location.origin}/admin?unit=${encodeURIComponent(unit.id)}`}
+                              />
+                            ))}
+                          </div>
+                        )}
                         {(inventoryUnitsByProduct[product.id]?.total || 0) === 0 && !inventoryUnitsByProduct[product.id]?.loading && (
                           <p className="admin-muted-copy">Set a physical count above to create individually tracked units and unique labels.</p>
                         )}
@@ -3206,9 +3552,9 @@ function App() {
                       <button
                         type="button"
                         className="secondary-button"
-                        onClick={() => setTaxInvoiceOrder(order)}
+                        onClick={() => printInvoice(order)}
                       >
-                        Print draft tax invoice
+                        Print invoice
                       </button>
                       <button
                         type="button"
@@ -3268,45 +3614,7 @@ function App() {
                         {order.state} {order.postalCode}
                       </p>
                     )}
-                    {taxInvoiceOrder?.id === order.id && (
-                      <section className="tax-draft-invoice" aria-label={`Draft invoice for ${order.orderNumber}`}>
-                        <p className="tax-invoice-watermark">DRAFT · NOT A TAX INVOICE</p>
-                        <h1>Pro-forma order summary</h1>
-                        <p>Order {order.orderNumber} · {indiaDateTime.format(new Date(order.created_at))}</p>
-                        <h2>Seller</h2>
-                        <p>
-                          {order.sellerLegalName || 'Business legal name not configured'}<br />
-                          {order.sellerRegisteredAddress || 'Registered address not configured'}<br />
-                          {order.sellerRegisteredState || 'Registered state not configured'}
-                          {order.sellerGstin ? <><br />GSTIN: {order.sellerGstin}</> : null}
-                        </p>
-                        <h2>Customer / place of supply</h2>
-                        <p>
-                          {order.recipientName || 'Customer'}<br />
-                          {order.addressLine1}{order.addressLine2 ? `, ${order.addressLine2}` : ''}<br />
-                          {order.city}, {order.state} {order.postalCode}
-                        </p>
-                        <table>
-                          <thead><tr><th>Item</th><th>HSN/SAC</th><th>Qty</th><th>Taxable value</th><th>GST rate</th><th>GST amount</th></tr></thead>
-                          <tbody>
-                            {order.items.map((item) => (
-                              <tr key={item.id}>
-                                <td>{item.name}</td>
-                                <td>{item.hsnCode || '—'}</td>
-                                <td>{item.quantity}</td>
-                                <td>{money.format(item.price * item.quantity)}</td>
-                                <td>{item.gstRate === null ? 'Not recorded' : `${item.gstRate}%`}</td>
-                                <td>{item.taxAmount === null ? 'Not recorded' : money.format(item.taxAmount)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                        <p>Taxable subtotal: {order.taxableSubtotal === null ? 'Not recorded' : money.format(order.taxableSubtotal)}</p>
-                        <p>Recorded GST: {order.taxTotal === null ? 'Not recorded' : money.format(order.taxTotal)}</p>
-                        <strong>Total: {money.format(order.total)}</strong>
-                        <p>This draft is for internal review only. It is not a GST tax invoice, receipt, or proof of payment. Verify GST treatment, place of supply, tax components, invoice numbering, and statutory requirements with your tax professional before issuing a compliant document.</p>
-                      </section>
-                    )}
+                    {taxInvoiceOrder?.id === order.id && <OrderInvoice order={order} />}
                   </article>
                 ))}
               </div>
@@ -3347,6 +3655,9 @@ function App() {
                     <input type="password" required minLength="12" maxLength="256" autoComplete="new-password" value={newDeliveryAgent.password} onChange={(event) => setNewDeliveryAgent((previous) => ({ ...previous, password: event.target.value }))} />
                   </label>
                   <button className="secondary-button" type="submit">Create delivery account</button>
+                  {deliveryAgentNotice.text && (
+                    <p className={deliveryAgentNotice.type === 'error' ? 'admin-login-error' : 'admin-muted-copy'} role={deliveryAgentNotice.type === 'error' ? 'alert' : 'status'}>{deliveryAgentNotice.text}</p>
+                  )}
                 </form>
                 {deliveryAgents.length === 0 ? (
                   <p className="admin-muted-copy">Create a delivery account before assigning a route.</p>
@@ -3622,6 +3933,10 @@ function App() {
     );
   }
 
+  if (isPosPath) {
+    return <PosApp apiRequest={apiRequest} QrScannerDialog={QrScannerDialog} />;
+  }
+
   if (isDeliveryPath && deliveryChecking) {
     return (
       <main className="delivery-shell">
@@ -3641,9 +3956,19 @@ function App() {
           </a>
           <div className="header-actions">
             <a className="ghost-button" href="/">Storefront</a>
+            {deliveryAgent && <button className="primary-button" onClick={() => setScannerMode('delivery')}>Scan parcel</button>}
             {deliveryAgent && <button className="ghost-button" onClick={handleDeliveryLogout}>Sign out</button>}
           </div>
         </header>
+        {scannerMode === 'delivery' && (
+          <QrScannerDialog
+            continuous
+            title="Scan parcel items"
+            hint="Scan each item label in turn. Each one is recorded automatically."
+            onScan={handleDeliveryScan}
+            onClose={() => setScannerMode('')}
+          />
+        )}
         <main className="delivery-shell">
           {deliveryAgent ? (
             <>

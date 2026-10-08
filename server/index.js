@@ -9,6 +9,7 @@ import {
 } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { offlineAnalysis } from './offline-analyst.js';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import connectPgSimple from 'connect-pg-simple';
@@ -3356,17 +3357,15 @@ app.get('/api/admin/ai/status', requireAdmin, async (_request, response, next) =
   }
   response.json({
     agents,
-    provider: 'Google Gemini',
-    model: geminiModel,
-    configured: Boolean(geminiApiKey),
+    provider: geminiApiKey ? 'Google Gemini' : 'Built-in analyst',
+    model: geminiApiKey ? geminiModel : 'offline rules (free, no key)',
+    configured: true,
+    usesGemini: Boolean(geminiApiKey),
     dataPolicy: 'Only the selected-period aggregate business snapshot and the question are sent; no customer identities, addresses, or support messages are included.',
   });
 });
 
 app.post('/api/admin/ai/ask', requireAdmin, aiAnalysisLimiter, async (request, response, next) => {
-  if (!geminiApiKey) {
-    return response.status(503).json({ error: 'Gemini is not configured. Add GEMINI_API_KEY to the server environment and restart the API.' });
-  }
   try {
     const agents = await getAiAgentStates();
     if (!agents.find((agent) => agent.key === 'bi_analyst')?.effectiveEnabled) {
@@ -3392,6 +3391,15 @@ app.post('/api/admin/ai/ask', requireAdmin, aiAnalysisLimiter, async (request, r
 
   try {
     const snapshot = await getAiBusinessSnapshot(rangeDays);
+    if (!geminiApiKey) {
+      return response.json({
+        provider: 'Built-in analyst',
+        model: 'offline rules (free, no key)',
+        periodStart: snapshot.periodStart,
+        periodEnd: snapshot.periodEnd,
+        ...offlineAnalysis(question, snapshot),
+      });
+    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000);
     let geminiResponse;

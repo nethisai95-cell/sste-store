@@ -2633,11 +2633,11 @@ function App() {
                   <div className="admin-section-heading">
                     <div>
                       <p className="eyebrow">Ask your business data</p>
-                      <h2 id="admin-ai-title">Gemini BI developer</h2>
-                      <p>Ask questions about the selected report. Gemini can explain KPIs and suggest next steps; it cannot change store data.</p>
+                      <h2 id="admin-ai-title">AI business analyst</h2>
+                      <p>Ask questions about the selected report. The analyst can explain KPIs and suggest next steps; it cannot change store data.</p>
                     </div>
                     <span className={`admin-data-badge ${aiAnalystOn ? '' : 'attention'}`}>
-                      {!adminAiStatus?.configured ? 'Setup required' : aiAnalystOn ? 'Gemini connected' : 'Switched off'}
+                      {!adminAiStatus?.configured ? 'Setup required' : aiAnalystOn ? (adminAiStatus?.usesGemini ? 'Gemini connected' : 'Free built-in analyst') : 'Switched off'}
                     </span>
                   </div>
                   <div className="admin-ai-agents" aria-label="AI agent organisation chart">
@@ -2670,13 +2670,10 @@ function App() {
                     })}
                   </div>
                   <p className="admin-ai-privacy-note">
-                    Your question and aggregate report metrics are sent to Google Gemini. Customer names, emails, phone numbers, addresses, individual orders, and support messages are not included. Do not put personal details in your question.
+                    {adminAiStatus?.usesGemini
+                      ? 'Your question and aggregate report metrics are sent to Google Gemini. Customer names, emails, phone numbers, addresses, individual orders, and support messages are not included. Do not put personal details in your question.'
+                      : 'The free built-in analyst runs on this server: no data leaves your store and no subscription or key is needed. Optionally add a free GEMINI_API_KEY to the server environment for open-ended answers.'}
                   </p>
-                  {!adminAiStatus?.configured && (
-                    <p className="admin-ai-setup-note" role="status">
-                      Add <code>GEMINI_API_KEY</code> to the server's private environment and restart the API to enable this analyst. The key is never sent to the browser or displayed here.
-                    </p>
-                  )}
                   <div className="admin-ai-suggestions" aria-label="Suggested questions">
                     {[
                       'What changed in live collections compared with the previous period?',
@@ -2709,7 +2706,7 @@ function App() {
                     <div className="admin-ai-submit-row">
                       <span>{adminAnalyticsRange}-day report · aggregate data only</span>
                       <button className="primary-button" type="submit" disabled={!aiAnalystOn || adminAiLoading}>
-                        {adminAiLoading ? 'Gemini is analysing…' : 'Ask Gemini'}
+                        {adminAiLoading ? 'Analysing…' : 'Ask analyst'}
                       </button>
                     </div>
                   </form>

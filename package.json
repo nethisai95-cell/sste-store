@@ -9,7 +9,7 @@
     "cap:sync": "node scripts/cap-sync.mjs",
     "build": "vite build",
     "test": "node --test",
-    "test:unit": "node --test tests/invoice.test.js tests/pos-validation.test.js tests/qr-scan.test.js tests/order-validation.test.js tests/delivery-transitions.test.js tests/payment-methods.test.js tests/finance-validation.test.js",
+    "test:unit": "node --test tests/invoice.test.js tests/pos-validation.test.js tests/qr-scan.test.js tests/order-validation.test.js tests/delivery-transitions.test.js tests/payment-methods.test.js tests/finance-validation.test.js tests/offline-analyst.test.js",
     "preview": "vite preview --host 0.0.0.0",
     "start": "node server/index.js",
     "admin:hash": "node server/hash-password.js"

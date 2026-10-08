@@ -995,6 +995,64 @@ function App() {
     }
   }
 
+  const [activeAdminSection, setActiveAdminSection] = useState('');
+  const [showBackToTop, setShowBackToTop] = useState(false);
+
+  useEffect(() => {
+    const main = document.querySelector('main');
+    if (main && !main.id) {
+      main.id = 'main-content';
+      main.tabIndex = -1;
+    }
+    const titles = {
+      '/admin': 'Owner dashboard',
+      '/pos': 'Point of sale',
+      '/employee': 'Employee workspace',
+      '/delivery': 'Delivery operations',
+      '/account': 'Your account',
+    };
+    const section = titles[window.location.pathname];
+    document.title = section ? `${section} · SSTE Studio` : 'SSTE Studio — Home essentials for India';
+  });
+
+  useEffect(() => {
+    const topbar = document.querySelector('.topbar');
+    if (!topbar) return undefined;
+    const apply = () => document.documentElement.style.setProperty('--topbar-h', `${topbar.offsetHeight}px`);
+    apply();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(apply);
+    observer?.observe(topbar);
+    window.addEventListener('resize', apply);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', apply);
+    };
+  });
+
+  useEffect(() => {
+    if (!adminMode) return undefined;
+    const ids = ['admin-analytics', 'admin-ai', 'admin-finance', 'admin-crm', 'admin-employees', 'admin-inventory', 'payment-settings', 'admin-products', 'admin-orders', 'admin-logistics', 'admin-support', 'admin-feedback'];
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const line = window.innerHeight * 0.3;
+      let current = '';
+      for (const id of ids) {
+        const element = document.getElementById(id);
+        if (element && element.getBoundingClientRect().top <= line) current = id;
+      }
+      setActiveAdminSection(current);
+      setShowBackToTop(window.scrollY > 700);
+    };
+    const onScroll = () => { if (!frame) frame = window.setTimeout(update, 60); };
+    update();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      if (frame) window.clearTimeout(frame);
+    };
+  }, [adminMode]);
+
   const liveRefreshRef = useRef(null);
   const lastFullAdminLoad = useRef(Date.now());
   liveRefreshRef.current = async () => {
@@ -2496,20 +2554,42 @@ function App() {
             </div>
           </section>
           <nav className="admin-section-nav" aria-label="Owner dashboard sections">
-            <a href="#admin-analytics">Business intelligence</a>
-            <a href="#admin-finance">Tax & finance</a>
-            <a href="#admin-crm">Zoho CRM</a>
-            <a href="#admin-employees">Employee access</a>
-            <a href="#admin-ai">Gemini analyst</a>
-            <a href="#admin-inventory">Inventory</a>
-            <a href="#admin-logistics">Logistics</a>
-            <a href="#admin-support">Customer care</a>
-            <a href="#admin-feedback">Feedback</a>
-            <a href="#admin-products">Products</a>
-            <a href="#admin-orders">Orders</a>
+            {[
+              ['admin-analytics', 'Business intelligence'],
+              ['admin-ai', 'AI analyst'],
+              ['admin-finance', 'Tax & finance'],
+              ['admin-crm', 'Zoho CRM'],
+              ['admin-employees', 'Employee access'],
+              ['admin-inventory', 'Inventory'],
+              ['payment-settings', 'Payments'],
+              ['admin-products', 'Products'],
+              ['admin-orders', 'Orders'],
+              ['admin-logistics', 'Logistics'],
+              ['admin-support', 'Customer care'],
+              ['admin-feedback', 'Feedback'],
+            ].map(([id, label]) => (
+              <a
+                key={id}
+                href={`#${id}`}
+                className={activeAdminSection === id ? 'is-active' : ''}
+                aria-current={activeAdminSection === id ? 'location' : undefined}
+              >
+                {label}
+              </a>
+            ))}
             <a href="/delivery">Delivery portal</a>
-            <a href="#payment-settings-title">Payments</a>
+            <a href="/employee">Employee portal</a>
           </nav>
+          {showBackToTop && (
+            <button
+              type="button"
+              className="back-to-top"
+              aria-label="Back to top"
+              onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+            >
+              ↑
+            </button>
+          )}
 
           <section className="admin-bi-section" id="admin-analytics" aria-labelledby="admin-bi-title">
             <div className="admin-section-heading">
@@ -3439,7 +3519,7 @@ function App() {
             </section>
           </section>
 
-          <section className="admin-panel payment-settings-panel" aria-labelledby="payment-settings-title">
+          <section className="admin-panel payment-settings-panel" id="payment-settings" aria-labelledby="payment-settings-title">
             <div className="panel-header payment-settings-heading">
               <div>
                 <p className="eyebrow">Accept customer payments</p>

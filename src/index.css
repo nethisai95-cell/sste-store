@@ -3632,22 +3632,108 @@ button:hover {
 }
 
 .admin-section-nav {
+  position: sticky;
+  top: var(--topbar-h, 4.5rem);
+  z-index: 9;
   display: flex;
   gap: 0.45rem;
   overflow-x: auto;
+  scrollbar-width: thin;
   margin: -0.9rem 0 1.4rem;
-  padding: 0.25rem 0 0.5rem;
+  padding: 0.5rem 0;
+  background: rgba(245, 239, 233, 0.96);
+  backdrop-filter: blur(10px);
 }
 
 .admin-section-nav a {
   flex: 0 0 auto;
-  padding: 0.45rem 0.7rem;
+  padding: 0.55rem 0.85rem;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.6);
   color: var(--accent-deep);
-  font-size: 0.75rem;
+  font-size: 0.78rem;
   font-weight: 700;
+  transition: background 0.15s, color 0.15s;
+}
+
+.admin-section-nav a:hover {
+  background: #fff;
+}
+
+.admin-section-nav a.is-active {
+  background: var(--accent-deep);
+  border-color: var(--accent-deep);
+  color: #fff;
+}
+
+[id^="admin-"],
+#payment-settings {
+  scroll-margin-top: calc(var(--topbar-h, 4.5rem) + 3.5rem);
+}
+
+.skip-link {
+  position: fixed;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 100;
+  padding: 0.7rem 1rem;
+  border-radius: 8px;
+  background: #1f1a17;
+  color: #fff;
+  font-weight: 700;
+  transform: translateY(-200%);
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
+.back-to-top {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 20;
+  width: 3rem;
+  height: 3rem;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent-deep);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  color: #fff;
+  font-size: 1.3rem;
+  cursor: pointer;
+}
+
+@media (max-width: 720px) {
+  .topbar .header-actions {
+    flex-wrap: wrap;
+  }
+
+  .topbar .ghost-button,
+  .topbar .primary-button,
+  .topbar .secondary-button,
+  .cart-toggle {
+    min-height: 44px;
+  }
+
+  .admin-section-nav a {
+    padding: 0.65rem 0.95rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+@media print {
+  .skip-link,
+  .back-to-top,
+  .admin-section-nav {
+    display: none !important;
+  }
 }
 
 .admin-order-policy-note {

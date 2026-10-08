@@ -1806,6 +1806,9 @@ function App() {
       reorderLevel: product.reorderLevel,
     };
     try {
+      if (Number(draft.reorderLevel) > Number(draft.stockOnHand)) {
+        throw new Error('Reorder level cannot be more than the physical stock count.');
+      }
       const updated = await apiRequest(`/api/admin/products/${encodeURIComponent(product.id)}/inventory`, {
         method: 'PATCH',
         body: JSON.stringify({ stockOnHand: Number(draft.stockOnHand), reorderLevel: Number(draft.reorderLevel) }),
@@ -2114,6 +2117,9 @@ function App() {
       reorderLevel: product.reorderLevel,
     };
     try {
+      if (Number(draft.reorderLevel) > Number(draft.stockOnHand)) {
+        throw new Error('Reorder level cannot be more than the physical stock count.');
+      }
       const updatedProduct = await apiRequest(`/api/admin/products/${product.id}/inventory`, {
         method: 'PATCH',
         body: JSON.stringify({

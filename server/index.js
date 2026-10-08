@@ -3747,6 +3747,9 @@ app.patch('/api/admin/products/:id/inventory', requireAdminOrRoles('manager', 'i
   ) {
     return response.status(400).json({ error: 'Stock and reorder levels must be whole numbers between 0 and 1,000,000.' });
   }
+      if (reorderLevel > stockOnHand) {
+        return response.status(400).json({ error: 'Reorder level cannot be more than the physical stock count.' });
+      }
 
   const client = await pool.connect();
   try {

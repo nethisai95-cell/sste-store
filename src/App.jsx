@@ -465,15 +465,70 @@ function normalizeIndianMobile(value) {
   return digits.slice(0, 10);
 }
 
+const connectionListeners = new Set();
+let serverReachable = true;
+
+function setServerReachable(next) {
+  if (serverReachable === next) return;
+  serverReachable = next;
+  connectionListeners.forEach((listener) => listener(next));
+}
+
+function ConnectionBanner() {
+  const [online, setOnline] = useState(serverReachable);
+  const [browserOnline, setBrowserOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine);
+  useEffect(() => {
+    connectionListeners.add(setOnline);
+    const up = () => setBrowserOnline(true);
+    const down = () => setBrowserOnline(false);
+    window.addEventListener('online', up);
+    window.addEventListener('offline', down);
+    return () => {
+      connectionListeners.delete(setOnline);
+      window.removeEventListener('online', up);
+      window.removeEventListener('offline', down);
+    };
+  }, []);
+  useEffect(() => {
+    if (online) return undefined;
+    const probe = setInterval(() => {
+      fetch('/api/health', { cache: 'no-store' })
+        .then((response) => { if (response.ok) setServerReachable(true); })
+        .catch(() => {});
+    }, 3000);
+    return () => clearInterval(probe);
+  }, [online]);
+  if (online && browserOnline) return null;
+  return (
+    <div className="connection-banner" role="alert">
+      {browserOnline
+        ? 'Cannot reach the server right now. Your last action may not have been saved. Retrying automatically…'
+        : 'You are offline. Check your internet connection. Changes will not be saved until you are back online.'}
+    </div>
+  );
+}
+
 async function apiRequest(path, options = {}) {
-  const response = await fetch(path, {
-    credentials: 'same-origin',
-    ...options,
-    headers: {
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-      ...options.headers,
-    },
-  });
+  let response;
+  try {
+    response = await fetch(path, {
+      credentials: 'same-origin',
+      ...options,
+      headers: {
+        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+        ...options.headers,
+      },
+    });
+  } catch {
+    setServerReachable(false);
+    throw new Error('Cannot reach the server. Check your connection; it will retry automatically.');
+  }
+
+  if ([502, 503, 504].includes(response.status) || (response.status === 500 && path.startsWith('/api/') && !response.headers.get('content-type')?.includes('json'))) {
+    setServerReachable(false);
+    throw new Error('The server is not responding right now. Please try again in a moment.');
+  }
+  setServerReachable(true);
 
   if (response.status === 204) return null;
 
@@ -5438,4 +5493,11 @@ function App() {
   );
 }
 
-export default App;
+export default function AppWithConnectionBanner() {
+  return (
+    <>
+      <ConnectionBanner />
+      <App />
+    </>
+  );
+}
